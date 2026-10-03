@@ -3,7 +3,7 @@
 Environment: Apple Silicon Mac, Apple Swift 6.4, Xcode beta macOS 27 SDK;
 project deployment minimum macOS 13, Swift tools 5.9, Swift 5 language mode.
 
-- `swift test --build-system native`: 5 XCTest tests passed, zero failures.
+- `swift test --build-system native`: 10 XCTest tests passed, zero failures.
 - Official RAWv2 valid/minimum/maximum/unavailable vectors passed.
 - All truncated lengths, wrong company ID, and unsupported format rejected.
 - History sequence deduplication, 24-hour retention, and saved name/favorite
@@ -24,3 +24,14 @@ No physical RuuviTag was used during validation. Bluetooth permission outcomes,
 live radio discovery/readings, suspend/wake, and comparison with Ruuvi Station
 remain hardware smoke tests. Older macOS versions and Intel builds were not
 executed here. The provided prebuilt app is arm64; build from source for Intel.
+
+## MQTT v0.2
+
+- Real loopback MQTT broker: Gateway RAWv2 and RuuviBridge decoded JSON were
+  received by the actual MQTTNIO transport; pressure conversion and publisher
+  timestamps passed. Parsing, malformed JSON, status packets, future/nonfinite
+  timestamps, boolean fields and topic validation are covered.
+- Passwords are session-only; TLS uses system certificate verification.
+  Authentication/TLS against a production broker were not exercised.
+- This version pins MQTTNIO and its Swift dependencies in Package.resolved.
+  The tests and app build used the installed Swift 6.4 toolchain.

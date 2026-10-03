@@ -2,12 +2,15 @@ import Foundation
 import CoreBluetooth
 import Combine
 import RuuviCore
+import RuuviMQTT
 
 final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     @Published var sensors: [Sensor] = []
     @Published var status = "Starting Bluetooth…"
     @Published var scanning = false
     @Published var error: String?
+    @Published var usingMQTT = false
+    private var mqtt: MQTTInput?
     private var wantsScanning = true
     private var central: CBCentralManager!
     private var saveTask: DispatchWorkItem?
@@ -21,6 +24,7 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
         central = CBCentralManager(delegate: self, queue: .main)
     }
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard !usingMQTT else { return }
         scanning = false
         switch central.state {
         case .poweredOn: status = "Bluetooth ready"; if wantsScanning { start() }
@@ -31,7 +35,19 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
         default: status = "Waiting for Bluetooth…"
         }
     }
+    func useMQTT(_ config: MQTTSettings) {
+        mqtt?.stop(); usingMQTT = true; wantsScanning = false; central.stopScan(); scanning = false
+        let input = MQTTInput(settings: config)
+        input.onReading = { [weak self] sample in self?.receive(id: sample.identity, reading: sample.reading, rssi: sample.rssi) }
+        input.onStatus = { [weak self] message in self?.status = message }
+        mqtt = input; input.start()
+    }
+    func useBluetooth() {
+        mqtt?.stop(); mqtt = nil; usingMQTT = false; wantsScanning = true
+        centralManagerDidUpdateState(central)
+    }
     func toggleScanning() {
+        if usingMQTT { useBluetooth(); return }
         wantsScanning.toggle()
         if wantsScanning { start() } else { central.stopScan(); scanning = false; status = "Scanning paused" }
     }
@@ -43,14 +59,18 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard let data = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
+        guard !usingMQTT, let data = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
               let decoded = AdvertisementDecoder.decode(data, peripheralID: peripheral.identifier.uuidString, rssi: RSSI.intValue) else { return }
         let id = decoded.mac ?? peripheral.identifier.uuidString
+        receive(id: id, reading: decoded.reading, rssi: RSSI.intValue)
+    }
+    func receive(id: String, reading: Reading, rssi: Int) {
         if let index = sensors.firstIndex(where: { $0.id == id }) {
-            sensors[index].receive(decoded.reading, rssi: RSSI.intValue)
+            guard reading.date > sensors[index].lastSeen else { return }
+            sensors[index].receive(reading, rssi: rssi)
         } else {
-            var sensor = Sensor(id: id, date: decoded.reading.date, rssi: RSSI.intValue, reading: decoded.reading)
-            sensor.receive(decoded.reading, rssi: RSSI.intValue); sensors.append(sensor)
+            var sensor = Sensor(id: id, date: reading.date, rssi: rssi, reading: reading)
+            sensor.receive(reading, rssi: rssi); sensors.append(sensor)
         }
         scheduleSave()
     }

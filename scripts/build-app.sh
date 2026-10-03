@@ -7,8 +7,8 @@ BUILD_OPTIONS=()
 if swift build --help | /usr/bin/grep -q 'native.*Native Build System'; then
     BUILD_OPTIONS=(--build-system native)
 fi
-swift build "${BUILD_OPTIONS[@]}" -c release
-BIN_DIR=$(swift build "${BUILD_OPTIONS[@]}" -c release --show-bin-path)
+swift build "${BUILD_OPTIONS[@]}" ${RUUVIMAC_BUILD_PATH:+--scratch-path "$RUUVIMAC_BUILD_PATH"} -c release
+BIN_DIR=$(swift build "${BUILD_OPTIONS[@]}" ${RUUVIMAC_BUILD_PATH:+--scratch-path "$RUUVIMAC_BUILD_PATH"} -c release --show-bin-path)
 STAGING=$(mktemp -d)
 trap 'rm -rf "$STAGING"' EXIT
 APP="$STAGING/RuuviMac.app"
@@ -16,6 +16,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/RuuviMac" "$APP/Contents/MacOS/RuuviMac"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/BTKit-LICENSE.txt LICENSE "$APP/Contents/Resources/"
+cp -R Resources/ThirdPartyLicenses "$APP/Contents/Resources/"
+chmod -R u+w "$APP"
 xattr -cr "$APP"
 codesign --force --sign - --entitlements Resources/RuuviMac.entitlements "$APP"
 codesign --verify --deep --strict "$APP"

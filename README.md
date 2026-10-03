@@ -17,7 +17,7 @@ No official native macOS app was found. Ruuvi's [Station page](https://ruuvi.com
 
 ## Build and run
 
-Requires macOS 13+, a Bluetooth LE capable Mac, and Xcode 15+ or compatible Swift 5.9+ tools. Set Xcode's command-line tools in Xcode Settings → Locations if needed. BTKit is vendored, so builds need no external package downloads.
+Requires macOS 13+, a Bluetooth LE capable Mac, and Xcode 15+ or compatible Swift 5.9+ tools. Set Xcode's command-line tools in Xcode Settings → Locations if needed. BTKit is vendored. The first build downloads MQTTNIO and its pinned Swift dependencies; an internet connection is needed.
 
 ```sh
 cd RuuviMac
@@ -26,17 +26,31 @@ swift test
 open dist/RuuviMac.app
 ```
 
-Launch the app bundle so macOS associates Bluetooth permission with its bundle identifier and usage description. Allow Bluetooth access when prompted. Place a RuuviTag using format 5 (RAWv2) nearby, select it in the sidebar, and watch readings update. The bundle is locally ad-hoc signed and sandboxed with Bluetooth entitlement. For distribution use your own Developer ID, signing identity and notarization; this is not a notarized release.
+Launch the app bundle so macOS associates Bluetooth permission with its bundle identifier and usage description. Allow Bluetooth access when prompted. Place a RuuviTag using format 5 (RAWv2) nearby, select it in the sidebar, and watch readings update. The bundle is locally ad-hoc signed and sandboxed with Bluetooth and network-client entitlements. For distribution use your own Developer ID, signing identity and notarization; this is not a notarized release.
 
 If Swift 6.4 reports Finder metadata during test signing in a synced folder, use `swift test --build-system native` (the packaging script selects this automatically where supported), or build in a non-synced folder.
 
 For editing, open `Package.swift` in Xcode and select the RuuviMac executable scheme / My Mac. Use the bundled build script to produce the runnable app; a raw `swift run` executable is not the supported permission flow. This is a Swift Package project and does not require XcodeGen or CocoaPods.
 
+## MQTT input (v0.2)
+
+Open **MQTT settings** to enter your broker hostname, port, topic filter, optional username/password, and TLS setting. Connect MQTT switches from Bluetooth to the broker; **Use Bluetooth** switches back. MQTT reconnects automatically during the session. The app starts with Bluetooth on the next launch. Non-secret connection settings are saved; the password remains in memory for this session only.
+
+Use port 1883 for plain MQTT or your broker's TLS port (commonly 8883), and enable TLS for the latter. TLS verifies the broker certificate using system trust; self-signed certificates need to be trusted by the operating system. Enter a hostname rather than a URL. The default topic filter is `ruuvi/#`; change it to match your publisher, for example `ruuvibridge/#`.
+
+Supported input is MQTT 3.1.1 JSON from:
+
+- [Ruuvi Gateway](https://docs.ruuvi.com/ruuvi-gateway-firmware/data-formats/mqtt-time-stamped-data-from-bluetooth-sensors): `data` advertisement hex, `ts` UNIX seconds, and `rssi`; `gwts` is a fallback timestamp.
+- [ruuvi-go-gateway](https://github.com/Scrin/ruuvi-go-gateway): the same raw Gateway fields.
+- [RuuviBridge](https://github.com/Scrin/RuuviBridge): `data_format: 5`, `mac`, `timestamp` UNIX seconds, `rssi`, and decoded sensor fields. Bridge pressure in Pa is converted to hPa; voltage remains V and acceleration remains g.
+
+Only RAWv2 / format 5 readings with a valid source UNIX timestamp and RSSI are accepted. Configure Gateway timestamped publishing; its untimestamped mode is ignored. Status messages and malformed packets are ignored. Retained messages keep their source timestamps; duplicates and older messages cannot overwrite fresher readings. The sensor MAC shares names, favorites, and history with Bluetooth readings. History is collected as messages arrive, at most once per minute, without downloading older broker or tag history. This is a subscriber; configure your existing Gateway/Bridge to publish to the broker separately.
+
 ## Data and behavior
 
 Names, favorites, latest readings, and history are stored atomically in `~/Library/Containers/org.ruuvimac.app/Data/Library/Application Support/RuuviMac/sensors.json` when sandboxed (or `~/Library/Application Support/RuuviMac/sensors.json` without sandbox). Updates flush about every five seconds and at normal termination. A forced quit may lose the latest few seconds. A malformed archive is reported rather than silently ignored; move it aside to reset.
 
-History records new measurement sequences at minute intervals while this Mac is awake and the app is scanning. Repeated transmissions are omitted. Retention is pruned on new samples; old offline samples may remain on disk, but are excluded from the 24-hour chart. Last readings remain visible after relaunch and show stale until rediscovered. Samples use Mac receipt timestamps, not tag clock timestamps.
+History records new measurement sequences at minute intervals while this Mac is awake and the app receives readings. Repeated transmissions are omitted. Retention is pruned on new samples; old offline samples may remain on disk, but are excluded from the 24-hour chart. Last readings remain visible after relaunch and show stale until rediscovered. Bluetooth samples use Mac receipt timestamps; MQTT samples use publisher UNIX timestamps.
 
 RAWv2 carries a full sensor MAC used as identity. An unavailable MAC falls back to CoreBluetooth's local peripheral UUID, which can change if macOS resets Bluetooth identity. Pausing scanning keeps existing data visible. This app makes no BLE connection and does not change tag configuration.
 
@@ -52,12 +66,12 @@ RAWv2 carries a full sensor MAC used as identity. An unavailable MAC falls back 
 
 ## Validation and limitations
 
-Run `swift test` for official protocol vectors, malformed/truncated/wrong-manufacturer packets, sentinel handling, history retention/deduplication, and archive round trips. The native executable and app bundle can be built locally. Real sensor discovery, permission prompts, range, suspend/wake behavior, and battery readings still require a physical RuuviTag smoke test; automated tests cannot establish radio interoperability.
+Run `swift test` for MQTT message parsing and settings, official protocol vectors, malformed/truncated/wrong-manufacturer packets, sentinel handling, history retention/deduplication, and archive round trips. Set `RUUVI_MQTT_TEST_PORT=18884` with a local broker on 127.0.0.1 to include the real MQTT transport test; otherwise it is skipped. The native executable and app bundle can be built locally. Real sensor discovery, permission prompts, range, suspend/wake behavior, and battery readings still require a physical RuuviTag smoke test; automated tests cannot establish radio interoperability.
 
 Hardware smoke test: launch the bundle, grant Bluetooth, verify a nearby RAWv2 tag appears and readings agree with Ruuvi Station, rename/favorite it, wait for history samples, pause/resume, relaunch to check persistence, move it out of range, and toggle Bluetooth off/on. Also test denied permission recovery in System Settings.
 
-No cloud sync, alarms, background launch service, sensor-memory download, CSV export, or firmware updates in v0.1. The app must stay running and the Mac awake to collect samples.
+No cloud sync, alarms, background launch service, sensor-memory download, CSV export, or firmware updates in v0.2. The app must stay running and the Mac awake to collect samples.
 
 ## Licensing
 
-New project code is MIT licensed (`LICENSE`). Ruuvi's BTKit remains BSD-3-Clause; its notice is included in `Resources/BTKit-LICENSE.txt` and must accompany distributions. The packaging script includes this notice. Ruuvi names and trademarks belong to their owners. This project is independent and is not an official Ruuvi product.
+New project code is MIT licensed (`LICENSE`). Ruuvi's BTKit remains BSD-3-Clause; its notice is included in `Resources/BTKit-LICENSE.txt` and must accompany distributions. The packaging script includes this notice and third-party MQTTNIO / Swift dependency license and attribution files from `Resources/ThirdPartyLicenses`. MQTTNIO and the Swift dependencies use Apache-2.0 (some with Swift runtime exceptions); SwiftNIO SSL includes BoringSSL under its own notices. Ruuvi names and trademarks belong to their owners. This project is independent and is not an official Ruuvi product.

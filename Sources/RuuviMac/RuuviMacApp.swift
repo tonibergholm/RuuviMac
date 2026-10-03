@@ -19,6 +19,7 @@ struct ContentView: View {
     @ObservedObject var store: SensorStore
     @State private var selection: String?
     @State private var favoritesOnly = false
+    @State private var mqttSettings = false
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
@@ -45,7 +46,7 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "sensor.tag.radiowaves.forward.fill").font(.system(size: 52)).foregroundStyle(.teal)
-                    Text(store.sensors.isEmpty ? "Bring a RuuviTag nearby" : "Select a sensor").font(.title2)
+                    Text(store.sensors.isEmpty ? (store.usingMQTT ? "Waiting for MQTT readings" : "Bring a RuuviTag nearby") : "Select a sensor").font(.title2)
                     Text("Read temperature, humidity, and pressure directly over Bluetooth. No pairing or account needed.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 400)
                     Text("Supports RuuviTag RAWv2 (format 5). History is collected while this app runs.").font(.caption).foregroundStyle(.secondary)
@@ -54,12 +55,14 @@ struct ContentView: View {
         }
         .safeAreaInset(edge: .bottom) {
             HStack {
-                Circle().fill(store.scanning ? Color.green : Color.secondary).frame(width: 7, height: 7)
+                Circle().fill((store.scanning || store.status.hasPrefix("MQTT subscribed")) ? Color.green : Color.secondary).frame(width: 7, height: 7)
                 Text(store.status).font(.caption)
                 Spacer()
-                Button(store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }
+                Button("MQTT settings…") { mqttSettings = true }
+                Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }
             }.padding(12).background(.bar)
         }
+        .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
         .alert("Storage problem", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -85,7 +88,7 @@ struct SensorDetail: View {
                 }
                 TimelineView(.periodic(from: .now, by: 10)) { context in
                     HStack {
-                        Text(context.date.timeIntervalSince(sensor.lastSeen) > 30 ? "No recent signal" : "Nearby")
+                        Text(context.date.timeIntervalSince(sensor.lastSeen) > 30 ? "No recent signal" : "Recent reading")
                         Text("Last seen \(sensor.lastSeen.formatted(date: .omitted, time: .standard)) · \(sensor.rssi) dBm")
                     }.font(.caption).foregroundStyle(.secondary)
                 }
@@ -110,7 +113,7 @@ struct SensorDetail: View {
                         }
                     }.chartYAxisLabel(metric == "Temperature" ? "°C" : metric == "Humidity" ? "%" : "hPa")
                         .frame(height: 220)
-                    Text("\(points.count) samples · up to one per minute · collected only while awake and scanning")
+                    Text("\(points.count) samples · up to one per minute · collected while the app receives readings")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()

@@ -59,8 +59,8 @@ public struct Sensor: Codable, Identifiable {
             if let sequence = reading.sequence, sequence == last.sequence { return }
         }
         history.append(reading)
-        history.removeAll { reading.date.timeIntervalSince($0.date) > 86400 }
-        if history.count > 1440 { history.removeFirst(history.count - 1440) }
+        history.removeAll { reading.date.timeIntervalSince($0.date) > TagLogAccumulator.retention }
+        if history.count > TagLogAccumulator.maxSamples { history.removeFirst(history.count - TagLogAccumulator.maxSamples) }
     }
 }
 

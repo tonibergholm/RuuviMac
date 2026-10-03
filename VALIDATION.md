@@ -1,12 +1,12 @@
 # Validation — October 3, 2026
 
-Environment: Apple Silicon Mac, Apple Swift 6.4, Xcode beta macOS 27 SDK;
+Environment: Apple Silicon Mac, Apple Swift 6.4, Xcode 27.0 release macOS 27 SDK;
 project deployment minimum macOS 13, Swift tools 5.9, Swift 5 language mode.
 
 - `swift test --build-system native`: 10 XCTest tests passed, zero failures.
 - Official RAWv2 valid/minimum/maximum/unavailable vectors passed.
 - All truncated lengths, wrong company ID, and unsupported format rejected.
-- History sequence deduplication, 24-hour retention, and saved name/favorite
+- History sequence deduplication, retention, and saved name/favorite
   archive round trips passed.
 - Release executable and sandboxed ad-hoc signed `.app` built successfully.
 - Clean app ZIP extracted to a temporary folder passed
@@ -20,9 +20,9 @@ encountered this metadata; validation used its native build-system option.
 Upstream BTKit emits Swift 6.4 weak-capture warnings; there are no project build
 errors. The two documented macOS platform guards fix unavailable API calls.
 
-No physical RuuviTag was used during validation. Bluetooth permission outcomes,
-live radio discovery/readings, suspend/wake, and comparison with Ruuvi Station
-remain hardware smoke tests. Older macOS versions and Intel builds were not
+Initial v0.1 validation did not use a physical tag. Subsequent native app checks
+received live readings from a nearby RuuviTag. Suspend/wake and comparison with
+Ruuvi Station remain hardware smoke tests. Older macOS versions and Intel builds were not
 executed here. The provided prebuilt app is arm64; build from source for Intel.
 
 ## MQTT v0.2
@@ -46,3 +46,18 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
   Older Xcode and macOS releases were not run for this icon change.
 - Release app rebuilt and clean ZIP passed strict signature verification.
 - On macOS 27.0.1, NSWorkspace resolved the bundled sensor icon successfully.
+
+## Tag history v0.3
+
+- All 13 tests passed, including the real MQTT broker test. Official log-read
+  request framing, negative temperature and pressure units, missing values,
+  partial/out-of-order fields and duplicate imports are covered.
+- Imports preserve the latest reading, last-seen time, names and favorites;
+  local history retains ten days and supports both chart periods.
+- Release app built using Xcode 27.0 (27A266a), Swift 6.4 and SDK 27.
+- The native download button found the physical tag, attempted a connection,
+  reported its timeout and resumed live scanning with existing history intact.
+  The tag could not establish a connection from either this Mac or Omarchy;
+  onboard historical values therefore remain unverified on physical hardware.
+  Range, connectable logging firmware and other active connections must be
+  checked before repeating that test. No firmware or tag data was changed.

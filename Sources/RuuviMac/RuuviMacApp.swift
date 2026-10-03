@@ -58,8 +58,8 @@ struct ContentView: View {
                 Circle().fill((store.scanning || store.status.hasPrefix("MQTT subscribed")) ? Color.green : Color.secondary).frame(width: 7, height: 7)
                 Text(store.status).font(.caption)
                 Spacer()
-                Button("MQTT settings…") { mqttSettings = true }
-                Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }
+                Button("MQTT settings…") { mqttSettings = true }.disabled(store.downloadingTag != nil)
+                Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }.disabled(store.downloadingTag != nil)
             }.padding(12).background(.bar)
         }
         .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
@@ -74,7 +74,8 @@ struct SensorDetail: View {
     @ObservedObject var store: SensorStore
     @State private var name = ""
     @State private var metric = "Temperature"
-    private var points: [Reading] { sensor.history.filter { Date().timeIntervalSince($0.date) <= 86400 } }
+    @State private var historyDays = 1
+    private var points: [Reading] { sensor.history.filter { Date().timeIntervalSince($0.date) <= Double(historyDays * 86400) } }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -99,8 +100,12 @@ struct SensorDetail: View {
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Collected history · last 24 hours").font(.headline)
+                        Text("History").font(.headline)
                         Spacer()
+                        Picker("Period", selection: $historyDays) {
+                            Text("Last 24 hours").tag(1)
+                            Text("Last 10 days").tag(10)
+                        }.frame(width: 150)
                         Picker("Measurement", selection: $metric) {
                             Text("Temperature").tag("Temperature")
                             Text("Humidity").tag("Humidity")
@@ -113,8 +118,14 @@ struct SensorDetail: View {
                         }
                     }.chartYAxisLabel(metric == "Temperature" ? "°C" : metric == "Humidity" ? "%" : "hPa")
                         .frame(height: 220)
-                    Text("\(points.count) samples · up to one per minute · collected while the app receives readings")
+                    Text("\(points.count) samples · live readings and downloaded tag history")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(store.downloadingTag == sensor.id ? "Cancel history download" : "Download tag history") {
+                        historyDays = 10; store.downloadHistory(sensor.id)
+                    }.disabled(store.downloadingTag != nil && store.downloadingTag != sensor.id)
+                    Text(store.logStatus).font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
                 HStack {

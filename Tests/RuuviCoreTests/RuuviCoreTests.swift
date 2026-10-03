@@ -54,7 +54,7 @@ final class RuuviCoreTests: XCTestCase {
         XCTAssertEqual(sensor.history.count, 1)
         r.sequence = 206; sensor.receive(r, rssi: -70)
         XCTAssertEqual(sensor.history.count, 2)
-        r.date.addTimeInterval(86401); r.sequence = 207; sensor.receive(r, rssi: -50)
+        r.date.addTimeInterval(TagLogAccumulator.retention + 1); r.sequence = 207; sensor.receive(r, rssi: -50)
         XCTAssertEqual(sensor.history.count, 1)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }

@@ -10,6 +10,9 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     @Published var scanning = false
     @Published var error: String?
     @Published var usingMQTT = false
+    @Published var downloadingTag: String?
+    @Published var logStatus = ""
+    private var logReader: TagLogReader?
     private var mqtt: MQTTInput?
     private var wantsScanning = true
     private var central: CBCentralManager!
@@ -52,7 +55,7 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
         if wantsScanning { start() } else { central.stopScan(); scanning = false; status = "Scanning paused" }
     }
     private func start() {
-        guard central.state == .poweredOn else { return }
+        guard downloadingTag == nil, central.state == .poweredOn else { return }
         // RuuviTags need no pairing and do not require a advertised service filter.
         central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         scanning = true; status = "Scanning for nearby RuuviTags"
@@ -73,6 +76,23 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
             sensor.receive(reading, rssi: rssi); sensors.append(sensor)
         }
         scheduleSave()
+    }
+    func downloadHistory(_ id: String) {
+        guard downloadingTag == nil else { logReader?.cancel(); return }
+        downloadingTag = id; central.stopScan(); scanning = false
+        let reader = TagLogReader(identity: id); logReader = reader
+        reader.onProgress = { [weak self] message in self?.logStatus = message }
+        reader.onResult = { [weak self] readings, issue in
+            guard let self else { return }
+            var added = 0
+            if let i = self.sensors.firstIndex(where: { $0.id == id }) {
+                added = self.sensors[i].mergeHistory(readings, now: Date()); self.persist()
+            }
+            self.logStatus = (issue.map { $0 + " " } ?? "Download complete. ") + "Imported \(added) new samples (\(readings.count) received)."
+            self.downloadingTag = nil; self.logReader = nil
+            if !self.usingMQTT && self.wantsScanning { self.start() }
+        }
+        reader.start()
     }
     func rename(_ id: String, to name: String) {
         guard let i = sensors.firstIndex(where: { $0.id == id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

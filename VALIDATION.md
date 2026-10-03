@@ -55,9 +55,12 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
 - Imports preserve the latest reading, last-seen time, names and favorites;
   local history retains ten days and supports both chart periods.
 - Release app built using Xcode 27.0 (27A266a), Swift 6.4 and SDK 27.
-- The native download button found the physical tag, attempted a connection,
-  reported its timeout and resumed live scanning with existing history intact.
-  The tag could not establish a connection from either this Mac or Omarchy;
-  onboard historical values therefore remain unverified on physical hardware.
-  Range, connectable logging firmware and other active connections must be
-  checked before repeating that test. No firmware or tag data was changed.
+- The native download button completed a real RuuviTag transfer: 1,644 stored
+  samples received and 1,558 new samples imported alongside existing history.
+  The saved archive had 1,702 samples with all three environmental fields;
+  relaunch showed the downloaded history and preserved the name/favorite.
+- Early connection timeouts were followed by a successful transfer after the
+  user released an iOS connection to the tag. Live scanning resumed afterward.
+  No firmware or tag data was changed.
+- Connectable-advertisement checks now give guidance when the tag broadcasts
+  without accepting connections. Only one app should connect to a tag at once.

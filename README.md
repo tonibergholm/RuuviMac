@@ -2,6 +2,8 @@
 
 An independent, open-source native SwiftUI macOS MVP for nearby RuuviTags.
 
+<img src="docs/app-icon.png" alt="RuuviMac sensor and radio waves app icon" width="128" />
+
 ## Official app check — October 3, 2026
 
 No official native macOS app was found. Ruuvi's [Station page](https://ruuvi.com/station/) advertises Android, iOS, and a cloud web app. The [official App Store listing](https://apps.apple.com/us/app/ruuvi-station/id1384475885?platform=mac) lists iPhone, iPad, and Apple Vision compatibility, with no Mac entry. This is a point-in-time finding, not a guarantee about future releases or every regional store. The web app is an existing option for Mac users with cloud-connected sensors.
@@ -45,6 +47,12 @@ Supported input is MQTT 3.1.1 JSON from:
 - [RuuviBridge](https://github.com/Scrin/RuuviBridge): `data_format: 5`, `mac`, `timestamp` UNIX seconds, `rssi`, and decoded sensor fields. Bridge pressure in Pa is converted to hPa; voltage remains V and acceleration remains g.
 
 Only RAWv2 / format 5 readings with a valid source UNIX timestamp and RSSI are accepted. Configure Gateway timestamped publishing; its untimestamped mode is ignored. Status messages and malformed packets are ignored. Retained messages keep their source timestamps; duplicates and older messages cannot overwrite fresher readings. The sensor MAC shares names, favorites, and history with Bluetooth readings. History is collected as messages arrive, at most once per minute, without downloading older broker or tag history. This is a subscriber; configure your existing Gateway/Bridge to publish to the broker separately.
+
+## App icon
+
+The original teal sensor / radio-wave artwork is MIT licensed. `Resources/AppIcon.icon` is an editable Icon Composer document with separate SVG layers. Apple renders the glass, lighting and shape; the artwork does not bake in shadows or a rounded-square mask. Default, dark and mono previews were checked with Xcode 27's `ictool --design-generation 27`, following [Apple's Icon Composer guidance](https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer).
+
+The build script uses `actool` on Xcode 26+ to bundle `Assets.car` and `AppIcon.icns`, with both `CFBundleIconName` and `CFBundleIconFile` set. Xcode 15–25 builds use the checked-in, Apple-generated ICNS fallback. The app still supports macOS 13+. To change the layered design, open `Resources/AppIcon.icon` in Icon Composer and rebuild. If editing on Xcode 26+, refresh the checked-in fallback from the resulting app bundle too.
 
 ## Data and behavior
 

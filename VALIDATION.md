@@ -35,3 +35,14 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
   Authentication/TLS against a production broker were not exercised.
 - This version pins MQTTNIO and its Swift dependencies in Package.resolved.
   The tests and app build used the installed Swift 6.4 toolchain.
+
+## Icon v0.2.1
+
+- Xcode 27 Icon Composer / actool compiled the original vector-layer design.
+- Native generation-27 default, dark and monochrome renders were inspected.
+- Build includes the compiled layered Assets.car and legacy AppIcon.icns,
+  referenced by CFBundleIconName and CFBundleIconFile.
+- The checked-in ICNS preserves an icon when building with older Xcode.
+  Older Xcode and macOS releases were not run for this icon change.
+- Release app rebuilt and clean ZIP passed strict signature verification.
+- On macOS 27.0.1, NSWorkspace resolved the bundled sensor icon successfully.

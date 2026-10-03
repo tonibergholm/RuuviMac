@@ -12,6 +12,7 @@ final class TagLogReader: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private var deadline: DispatchWorkItem?
     private var finishing = false
     private var delivered = false
+    private var sawNonconnectable = false
     private var issue: String?
     var onProgress: ((String) -> Void)?
     var onResult: (([Reading], String?) -> Void)?
@@ -48,6 +49,13 @@ final class TagLogReader: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
               let data = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
               let decoded = AdvertisementDecoder.decode(data, peripheralID: peripheral.identifier.uuidString, rssi: RSSI.intValue),
               (decoded.mac ?? peripheral.identifier.uuidString) == identity else { return }
+        if let connectable = advertisementData[CBAdvertisementDataIsConnectable] as? NSNumber,
+           !connectable.boolValue {
+            let message = "Tag is broadcasting without accepting connections. Close other tag connections and check that its firmware supports logging."
+            onProgress?(message)
+            if !sawNonconnectable { sawNonconnectable = true; arm(20, message) }
+            return
+        }
         central.stopScan(); self.peripheral = peripheral; peripheral.delegate = self
         onProgress?("Connecting to tag…")
         arm(20, "Could not connect. Bring the tag closer, enable connectable firmware, and close other tag connections.")

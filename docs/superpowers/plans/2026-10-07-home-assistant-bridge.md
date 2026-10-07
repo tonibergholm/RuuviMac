@@ -654,14 +654,15 @@ git commit -m "Add Keychain password store for the Home Assistant broker"
 **Interfaces:**
 - Consumes: `HomeAssistantDiscovery`, `HomeAssistantSettings`, `PendingRemoval` (Tasks 1, 2); MQTTNIO 2.13.0. Facts checked in its source: `MQTTClient.Configuration(keepAliveInterval:connectTimeout:timeout:userName:password:useSSL:tlsConfiguration:)` where `timeout` bounds ACK waits and defaults to nil; `connect(will:)` keeps the will's retain flag but always sends it at QoS 0; `shutdown` closes the socket without DISCONNECT (the broker then sends the will); `subscribe` returns an `MQTTSuback` whose `returnCodes` may contain `.failure`.
 - Produces:
-  - `public enum MainRunLoop { static func perform(_:); static func after(_:_:) }`: runs blocks on the main run loop in common and modal-panel modes, so they run while AppKit waits on `.terminateLater`.
-  - `public final class HomeAssistantPublisher` with `struct Tag { macKey; name; init(macKey:name:) }`, `init(settings:password:bridge:version:)`, `let settings`, callbacks `onStatus`, `onConnected`, `onDisconnected`, `onBirth`, `onRemoved: ((PendingRemoval) -> Void)?`, `private(set) var connected`, `start()`, `publish(tag:reading:rssi:)`, `publishConfig(tag:)`, `remove(_:)`, `stop(timeout: TimeInterval = 2, _ completion: @escaping () -> Void)`, internal `dropConnectionForTesting()`.
+  - `public enum MainRunLoop { static func perform(_:); static func after(_:_:) -> Timer }`: runs blocks on the main run loop in common and modal-panel modes, so they run while AppKit waits on `.terminateLater`.
+  - `public final class HomeAssistantPublisher` with `struct Tag { macKey; name; init(macKey:name:) }`, `init(settings:password:bridge:version:)`, `let settings`, callbacks `onStatus`, `onConnected`, `onDisconnected`, `onBirth`, `onRemoved: ((PendingRemoval) -> Void)?`, `private(set) var connected`, `start()`, `publish(tag:reading:rssi:)`, `publishConfig(tag:)`, `remove(_:)`, `stop(timeout: TimeInterval = 2, closed: @escaping () -> Void)`, internal `dropConnectionForTesting()`.
 
 Rules the code below implements:
 - All state is main-queue confined; NIO callbacks hop to main and check `self.client === c` before touching state.
 - Any failed config, state or removal publish on the current client is treated as a broken connection: the client is shut down and the normal reconnect runs. Pending removals stay in the ledger and are retried by the bridge on the next `onConnected`.
 - A rejected birth subscription is a connection failure.
-- `stop` always completes exactly once, asynchronously, on the main run loop, within `timeout` seconds, even if the broker never acknowledges.
+- `stop(closed:)` completes exactly once, asynchronously, on the main run loop, and only after the client has closed. If the broker does not acknowledge within `timeout` seconds the socket is force-closed. Quit adds its own hard deadline in the app delegate.
+- After a connection failure, the reconnect is scheduled only after the old client has closed, so the old connection's Last Will cannot arrive after the new `online`.
 
 - [ ] **Step 1: Write the loopback test**
 
@@ -704,6 +705,7 @@ final class HomeAssistantPublisherTests: XCTestCase {
     }
 
     func testDiscoveryAvailabilityBirthWillRemovalAndShutdown() throws {
+        XCTAssertTrue(Thread.isMainThread, "callbacks and counters below rely on the main run loop")
         guard let portText = ProcessInfo.processInfo.environment["RUUVI_MQTT_TEST_PORT"], let port = Int(portText) else { throw XCTSkip("No test broker supplied") }
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let prefix = "ruuvimac-test-\(run.prefix(8))"
@@ -769,6 +771,7 @@ final class HomeAssistantPublisherTests: XCTestCase {
 
     func testStopWithoutConnectionCompletesAsynchronously() {
         let publisher = HomeAssistantPublisher(settings: HomeAssistantSettings(host: "127.0.0.1", port: 1), password: nil, bridge: "00000000", version: "test")
+        XCTAssertTrue(Thread.isMainThread)
         var done = false
         publisher.stop { done = true }
         XCTAssertFalse(done, "completion must not run synchronously")
@@ -802,11 +805,12 @@ public enum MainRunLoop {
         CFRunLoopPerformBlock(CFRunLoopGetMain(), modes, block)
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
-    /// Call on the main thread.
-    public static func after(_ seconds: TimeInterval, _ block: @escaping () -> Void) {
+    /// Call on the main thread. Returns the timer so callers can cancel it.
+    @discardableResult public static func after(_ seconds: TimeInterval, _ block: @escaping () -> Void) -> Timer {
         let timer = Timer(timeInterval: seconds, repeats: false) { _ in block() }
         RunLoop.main.add(timer, forMode: .common)
         RunLoop.main.add(timer, forMode: RunLoop.Mode("NSModalPanelRunLoopMode"))
+        return timer
     }
 }
 ```
@@ -918,11 +922,19 @@ public final class HomeAssistantPublisher {
         client = nil
         if connected { connected = false; onDisconnected?() }
         configured = []
-        c.removeCloseListener(named: "reconnect"); c.shutdown { _ in }
         onStatus?(message)
-        let task = DispatchWorkItem { [weak self] in self?.connect() }
-        retry = task; DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+        let wait = delay
         delay = min(delay * 2, 30)
+        c.removeCloseListener(named: "reconnect")
+        // Reconnect only after the old socket has closed, so its Last Will cannot land after the new "online".
+        c.shutdown { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, !self.stopped else { return }
+                let task = DispatchWorkItem { [weak self] in self?.connect() }
+                self.retry = task
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: task)
+            }
+        }
     }
 
     /// Reports a failed publish on `c` as a broken connection, if `c` is still the current client.
@@ -965,36 +977,44 @@ public final class HomeAssistantPublisher {
     }
 
     /// Ordered shutdown: stop retries, publish retained offline and wait for the ack, disconnect, shut down.
-    /// Completes exactly once on the main run loop, never synchronously, and within `timeout` seconds.
-    /// If the offline message is not acknowledged the broker's Last Will marks this bridge offline.
-    public func stop(timeout: TimeInterval = 2, _ completion: @escaping () -> Void) {
+    /// `closed` runs exactly once on the main run loop, never synchronously, after the client has really closed.
+    /// If the broker has not acknowledged within `timeout` seconds the socket is closed anyway and the broker's
+    /// Last Will marks this bridge offline. Callers that need a hard time bound (quit) add their own deadline.
+    public func stop(timeout: TimeInterval = 2, closed: @escaping () -> Void) {
         stopped = true; retry?.cancel(); retry = nil
         let wasConnected = connected
         if connected { connected = false; onDisconnected?() }
         configured = []
         var completed = false
-        let complete = { if !completed { completed = true; completion() } }
+        var deadline: Timer?
+        let complete = {
+            guard !completed else { return }
+            completed = true; deadline?.invalidate(); closed()
+        }
         guard let c = client else { MainRunLoop.perform(complete); return }
         client = nil
         c.removeCloseListener(named: "reconnect")
-        let finish = { c.shutdown { _ in MainRunLoop.perform(complete) } }
-        MainRunLoop.after(timeout) { finish(); complete() }
+        // shutdown is idempotent; a second call reports alreadyShutdown, which is ignored.
+        let finish = { c.shutdown { error in
+            if let mqtt = error as? MQTTError, case .alreadyShutdown = mqtt { return }
+            MainRunLoop.perform(complete)
+        } }
+        deadline = MainRunLoop.after(timeout) { finish() }
         guard wasConnected, c.isActive() else { finish(); return }
         c.publish(to: availability, payload: ByteBuffer(string: "offline"), qos: .atLeastOnce, retain: true)
             .flatMap { c.disconnect() }
             .whenComplete { _ in finish() }
     }
 
-    /// Closes the socket without DISCONNECT so the broker sends the Last Will, then runs the normal reconnect path.
+    /// Runs the normal failure path: the socket closes without DISCONNECT, so the broker sends the Last Will,
+    /// and the reconnect is scheduled after the close completes.
     func dropConnectionForTesting() {
-        guard let c = client else { return }
-        c.shutdown { _ in }
-        failed(c, message: "Connection dropped for testing; reconnecting…")
+        failed(client, message: "Connection dropped for testing; reconnecting…")
     }
 }
 ```
 
-`complete` is only invoked on the main thread (through `MainRunLoop`), so `completed` needs no lock. A second `shutdown` call after the timeout returns `alreadyShutdown` to its callback, which is ignored.
+`complete` is only invoked on the main thread (through `MainRunLoop`), so `completed` and `deadline` need no lock. Only the first `shutdown` call reports completion; a second one returns `alreadyShutdown`, which is ignored.
 
 - [ ] **Step 5: Build and run**
 
@@ -1025,7 +1045,9 @@ git commit -m "Add Home Assistant MQTT publisher with Last Will, birth handling 
   - `AppDelegate.homeAssistant: HomeAssistantBridge`.
 
 Lifecycle rules this code implements:
-- At most one publisher exists, plus at most one that is stopping. A new publisher starts only after the stopping one has completed (`restart` → `stop` → `start`). `start` refuses to run while either exists.
+- At most one publisher exists, plus at most one that is stopping. A new publisher starts only after the stopping one has really closed (`restart` → `stop(closed:)` → `start`). `start` refuses to run while either exists.
+- `shutdown` (quit) is terminal: `isShutDown` stops `start`, password-save commits and stop continuations from restarting anything.
+- A tag's publish choice is recorded on its first Bluetooth sighting while publishing is enabled, even before the publisher connects.
 - `generation` increments on every restart and shutdown. Keychain read results check it, so a late read for an old configuration never connects.
 - Settings and password metadata change only after the Keychain save succeeds. On failure, the old settings stay active and the sheet shows the error.
 - Every publisher callback checks `self.publisher === p` before changing state, except `onRemoved`, which records a real broker acknowledgement.
@@ -1112,6 +1134,8 @@ final class HomeAssistantBridge: ObservableObject {
     /// Latest name of every MAC-identified tag heard over Bluetooth this session, for birth and rename republish.
     private var names: [String: String] = [:]
     private var generation = 0
+    /// Set by `shutdown` (quit). Nothing restarts publishing afterwards.
+    private var isShutDown = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -1133,7 +1157,7 @@ final class HomeAssistantBridge: ObservableObject {
 
     /// Starts publishing with the current settings if enabled and no publisher is running or stopping.
     func start() {
-        guard publisher == nil, stopping == nil else { return }
+        guard !isShutDown, publisher == nil, stopping == nil else { return }
         generation += 1
         let current = generation, config = settings
         keychainProblem = false
@@ -1205,17 +1229,20 @@ final class HomeAssistantBridge: ObservableObject {
         old.stop { [weak self] in
             guard let self else { return }
             if self.stopping === old { self.stopping = nil }
-            self.start()
+            self.start()   // no-op after shutdown
         }
     }
 
-    /// Quit path. Completion runs on the main run loop within the publisher's 2 second bound, never synchronously.
+    /// Quit path, terminal: no later save, Keychain read or stop continuation restarts publishing.
+    /// Completion runs on the main run loop, never synchronously, once the running publisher has closed.
+    /// The app delegate adds the hard 2 second bound.
     func shutdown(_ completion: @escaping () -> Void) {
+        isShutDown = true
         generation += 1
         connected = false
         guard let p = publisher else { MainRunLoop.perform(completion); return }
         publisher = nil
-        p.stop(completion)
+        p.stop(closed: completion)
     }
 
     // MARK: Settings
@@ -1234,7 +1261,7 @@ final class HomeAssistantBridge: ObservableObject {
             completion("Enter the password again for the new username, host or port."); return
         }
         let commit: (Bool?) -> Void = { [weak self] passwordStored in
-            guard let self else { return }
+            guard let self, !self.isShutDown else { return }
             self.settings = new; self.enabled = newEnabled
             if let stored = passwordStored { self.hasPassword = stored; self.defaults.set(stored, forKey: "ha.hasPassword") }
             self.defaults.set(try? JSONEncoder().encode(new), forKey: "ha.settings")
@@ -1247,8 +1274,14 @@ final class HomeAssistantBridge: ObservableObject {
             guard hadPassword else { commit(false); return }
             saving = true
             keychainQueue.async {
-                try? store.delete(account: oldAccount)
-                DispatchQueue.main.async { self.saving = false; commit(false) }
+                let result = Result { try store.delete(account: oldAccount) }
+                DispatchQueue.main.async {
+                    self.saving = false
+                    switch result {
+                    case .success: commit(false)
+                    case .failure(let error): completion("Could not remove the saved password: " + Self.describe(error))
+                    }
+                }
             }
         } else if !password.isEmpty {
             saving = true
@@ -1274,12 +1307,20 @@ final class HomeAssistantBridge: ObservableObject {
     func receive(sensor: Sensor, reading: Reading, rssi: Int, source: ReadingSource) {
         guard source == .bluetooth, let key = HomeAssistantDiscovery.macKey(sensor.id) else { return }
         names[key] = sensor.name
-        guard let p = publisher else { return }
         var next = ledger
+        // Record the publish choice on first sighting while publishing is enabled, even before the
+        // publisher is connected (Keychain prompt, replacement), so a later default change cannot flip it.
+        if enabled { next.adopt(key, publishNewTags: settings.publishNewTags) }
+        guard let p = publisher else {
+            if next != ledger { ledger = next; saveLedger() }
+            return
+        }
         if let routed = router.route(id: sensor.id, source: source, connected: p.connected, ledger: &next,
                                      publishNewTags: p.settings.publishNewTags, now: Date()) {
             p.publish(tag: .init(macKey: routed, name: sensor.name), reading: reading, rssi: rssi)
-            next.markPublished(routed, brokerKey: p.settings.brokerKey)
+            if next.markPublished(routed, brokerKey: p.settings.brokerKey) {
+                status = "Connected to the Home Assistant broker · \(next.published[p.settings.brokerKey]?.count ?? 0) tags published"
+            }
         }
         // Assign only on change: this runs for every advertisement and `ledger` is published.
         if next != ledger { ledger = next; saveLedger() }
@@ -1334,7 +1375,7 @@ final class HomeAssistantBridge: ObservableObject {
 
 In `Sources/RuuviMac/AppDelegate.swift`:
 
-Add `let homeAssistant = HomeAssistantBridge()` after `let loginItem = LoginItem()`.
+Add `import RuuviMQTT` at the top of `AppDelegate.swift` (for `MainRunLoop`), and `let homeAssistant = HomeAssistantBridge()` after `let loginItem = LoginItem()`.
 
 At the start of `applicationDidFinishLaunching`, before the activity token, add:
 
@@ -1351,14 +1392,17 @@ Replace `applicationShouldTerminate`:
 ```swift
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard homeAssistant.connected else { return .terminateNow }
-        // Publish retained offline first. The publisher bounds this to 2 seconds and replies on the main run loop
-        // in modal-panel mode, after this method has returned.
+        // Publish retained offline first. Both paths reply on the main run loop in modal-panel mode,
+        // after this method has returned, and never later than 2 seconds.
         var replied = false
-        homeAssistant.shutdown {
+        let reply = {
             guard !replied else { return }
             replied = true
             NSApp.reply(toApplicationShouldTerminate: true)
         }
+        homeAssistant.shutdown(reply)
+        // Hard bound for quit; scheduled in modal-panel mode so it fires while AppKit waits.
+        MainRunLoop.after(2, reply)
         return .terminateLater
     }
 ```

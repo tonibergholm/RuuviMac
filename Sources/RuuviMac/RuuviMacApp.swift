@@ -5,26 +5,26 @@ import RuuviCore
 
 @main
 struct RuuviMacApp: App {
-    @StateObject private var store = SensorStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        WindowGroup {
-            ContentView(store: store)
+        Window("RuuviMac", id: "main") {
+            ContentView(store: delegate.store, selection: delegate.selection)
                 .frame(minWidth: 800, minHeight: 540)
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in store.persist() }
+                .background(WindowAccessor { delegate.registerMainWindow($0) })
         }
     }
 }
 
 struct ContentView: View {
     @ObservedObject var store: SensorStore
-    @State private var selection: String?
+    @ObservedObject var selection: SelectionModel
     @State private var favoritesOnly = false
     @State private var mqttSettings = false
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 Toggle("Favorites only", isOn: $favoritesOnly).padding()
-                List(selection: $selection) {
+                List(selection: $selection.selected) {
                     ForEach(store.sensors.filter { !favoritesOnly || $0.favorite }.sorted(by: MenuSelection.sidebarOrder)) { sensor in
                         HStack {
                             Image(systemName: sensor.favorite ? "star.fill" : "sensor.tag.radiowaves.forward")
@@ -38,7 +38,7 @@ struct ContentView: View {
                 }
             }.navigationTitle("RuuviMac")
         } detail: {
-            if let sensor = store.sensors.first(where: { $0.id == selection }) {
+            if let sensor = store.sensors.first(where: { $0.id == selection.selected }) {
                 SensorDetail(sensor: sensor, store: store).id(sensor.id)
             } else {
                 VStack(spacing: 16) {

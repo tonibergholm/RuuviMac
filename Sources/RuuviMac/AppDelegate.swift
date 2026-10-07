@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showMainWindow()
         return true
     }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard homeAssistant.connected else { return .terminateNow }
         // Publish retained offline first. Both paths reply on the main run loop in modal-panel mode,

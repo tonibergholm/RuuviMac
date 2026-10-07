@@ -12,6 +12,11 @@ struct RuuviMacApp: App {
                 .frame(minWidth: 800, minHeight: 540)
                 .background(WindowAccessor { delegate.registerMainWindow($0) })
         }
+        MenuBarExtra("RuuviMac", systemImage: "sensor.tag.radiowaves.forward") {
+            MenuBarView(store: delegate.store, selection: delegate.selection,
+                        loginItem: delegate.loginItem, delegate: delegate)
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 

@@ -65,7 +65,7 @@ struct ContentView: View {
                     Button("Move aside and start fresh") { store.moveArchiveAside() }
                 }
                 Spacer()
-                Toggle("Open at login", isOn: Binding(get: { loginItem.enabled }, set: { loginItem.set($0) }))
+                Toggle("Open at login", isOn: Binding(get: { loginItem.registered }, set: { loginItem.set($0) }))
                     .toggleStyle(.checkbox)
                 if loginItem.needsApproval {
                     Button("Approve in Login Items…") { loginItem.openSettings() }

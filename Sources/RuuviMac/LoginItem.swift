@@ -1,28 +1,34 @@
 import Foundation
 import AppKit
 import ServiceManagement
+import RuuviCore
 
 final class LoginItem: ObservableObject {
-    @Published private(set) var enabled = false
-    @Published private(set) var needsApproval = false
-    @Published private(set) var message: String?
+    @Published private(set) var state = LoginItemState()
+    var registered: Bool { state.registered }
+    var needsApproval: Bool { state.needsApproval }
+    var message: String? { state.message }
     init() { refresh() }
     func refresh() {
-        let status = SMAppService.mainApp.status
-        let isEnabled = status == .enabled
-        let isPending = status == .requiresApproval
-        if enabled != isEnabled { enabled = isEnabled }
-        if needsApproval != isPending { needsApproval = isPending }
-        if isEnabled, message != nil { message = nil }
+        var next = state
+        observeStatus(into: &next)
+        if next != state { state = next }
     }
     func set(_ on: Bool) {
+        var next = state
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            message = nil
+            next.succeeded()
         } catch {
-            message = "Open at login: \(error.localizedDescription)"
+            next.failed("Open at login: \(error.localizedDescription)")
         }
-        refresh()
+        observeStatus(into: &next)
+        if next != state { state = next }
+    }
+    private func observeStatus(into next: inout LoginItemState) {
+        let status = SMAppService.mainApp.status
+        next.observe(registered: status == .enabled || status == .requiresApproval,
+                     needsApproval: status == .requiresApproval)
     }
     func openSettings() { SMAppService.openSystemSettingsLoginItems() }
 }

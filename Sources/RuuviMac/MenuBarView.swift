@@ -40,7 +40,7 @@ struct MenuBarView: View {
         if store.savingPaused { Text("Saving paused") }
         Divider()
         Button("Open RuuviMac…") { open(select: nil) }
-        Toggle("Open at login", isOn: Binding(get: { loginItem.enabled }, set: { loginItem.set($0) }))
+        Toggle("Open at login", isOn: Binding(get: { loginItem.registered }, set: { loginItem.set($0) }))
         if loginItem.needsApproval { Button("Approve in Login Items…") { loginItem.openSettings() } }
         if let message = loginItem.message { Text(message) }
         Button("Quit RuuviMac") { NSApp.terminate(nil) }.keyboardShortcut("q")

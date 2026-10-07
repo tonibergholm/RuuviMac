@@ -8,13 +8,14 @@ struct RuuviMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         Window("RuuviMac", id: "main") {
-            ContentView(store: delegate.store, selection: delegate.selection, loginItem: delegate.loginItem)
+            ContentView(store: delegate.store, selection: delegate.selection, loginItem: delegate.loginItem,
+                        homeAssistant: delegate.homeAssistant)
                 .frame(minWidth: 800, minHeight: 540)
                 .background(WindowAccessor { delegate.registerMainWindow($0) })
         }
         MenuBarExtra("RuuviMac", systemImage: "sensor.tag.radiowaves.forward") {
             MenuBarView(store: delegate.store, selection: delegate.selection,
-                        loginItem: delegate.loginItem, delegate: delegate)
+                        loginItem: delegate.loginItem, homeAssistant: delegate.homeAssistant, delegate: delegate)
         }
         .menuBarExtraStyle(.menu)
     }
@@ -24,6 +25,7 @@ struct ContentView: View {
     @ObservedObject var store: SensorStore
     @ObservedObject var selection: SelectionModel
     @ObservedObject var loginItem: LoginItem
+    @ObservedObject var homeAssistant: HomeAssistantBridge
     @State private var favoritesOnly = false
     @State private var mqttSettings = false
     var body: some View {
@@ -45,7 +47,7 @@ struct ContentView: View {
             }.navigationTitle("RuuviMac")
         } detail: {
             if let sensor = store.sensors.first(where: { $0.id == selection.selected }) {
-                SensorDetail(sensor: sensor, store: store).id(sensor.id)
+                SensorDetail(sensor: sensor, store: store, homeAssistant: homeAssistant).id(sensor.id)
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "sensor.tag.radiowaves.forward.fill").font(.system(size: 52)).foregroundStyle(.teal)
@@ -71,11 +73,22 @@ struct ContentView: View {
                     Button("Approve in Login Items…") { loginItem.openSettings() }
                 }
                 if let message = loginItem.message { Text(message).font(.caption).foregroundStyle(.red) }
+                Button("Home Assistant…") { selection.showHomeAssistant = true }
                 Button("MQTT settings…") { mqttSettings = true }.disabled(store.downloadingTag != nil)
                 Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }.disabled(store.downloadingTag != nil)
             }.padding(12).background(.bar)
         }
         .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
+        .sheet(isPresented: $selection.showHomeAssistant, onDismiss: { selection.showHomeAssistant = false }) {
+            HomeAssistantSettingsView(bridge: homeAssistant)
+        }
+        .onChange(of: selection.showHomeAssistant) { show in
+            // One sheet at a time: close the MQTT sheet, then present on the next turn.
+            guard show, mqttSettings else { return }
+            mqttSettings = false
+            selection.showHomeAssistant = false
+            DispatchQueue.main.async { selection.showHomeAssistant = true }
+        }
         .alert("Storage problem", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             if store.savingPaused { Button("Move aside and start fresh") { store.moveArchiveAside() } }
             Button("OK") { store.error = nil }
@@ -86,6 +99,7 @@ struct ContentView: View {
 struct SensorDetail: View {
     let sensor: Sensor
     @ObservedObject var store: SensorStore
+    @ObservedObject var homeAssistant: HomeAssistantBridge
     @State private var name = ""
     @State private var metric = "Temperature"
     @State private var historyDays = 1
@@ -140,6 +154,20 @@ struct SensorDetail: View {
                         historyDays = 10; store.downloadHistory(sensor.id)
                     }.disabled(store.downloadingTag != nil && store.downloadingTag != sensor.id)
                     Text(store.logStatus).font(.caption).foregroundStyle(.secondary)
+                }
+                if homeAssistant.enabled, homeAssistant.macKey(for: sensor.id) != nil {
+                    HStack {
+                        Toggle("Publish to Home Assistant", isOn: Binding(
+                            get: { homeAssistant.isPublishing(sensor.id) },
+                            set: { homeAssistant.setPublishing(sensor.id, $0) }))
+                        .disabled(homeAssistant.isRemovalPending(sensor.id))
+                        Button(homeAssistant.isRemovalPending(sensor.id) ? "Removing…" : "Remove from Home Assistant") {
+                            homeAssistant.remove(sensor.id)
+                        }.disabled(homeAssistant.isRemovalPending(sensor.id))
+                        if homeAssistant.wasRemoved(sensor.id) { Text("Removed").foregroundStyle(.secondary) }
+                    }
+                    Text("Turning publishing off keeps the device in Home Assistant so another Mac can publish it. Remove deletes the device.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
                 HStack {

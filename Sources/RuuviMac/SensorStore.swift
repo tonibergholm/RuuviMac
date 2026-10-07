@@ -13,6 +13,9 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     @Published var downloadingTag: String?
     @Published var logStatus = ""
     @Published var savingPaused = false
+    /// Called on main after a reading is accepted. The Home Assistant bridge filters by source.
+    var onReading: ((Sensor, Reading, Int, ReadingSource) -> Void)?
+    var onRename: ((Sensor) -> Void)?
     private var logReader: TagLogReader?
     private var mqtt: MQTTInput?
     private var wantsScanning = true
@@ -47,7 +50,7 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     func useMQTT(_ config: MQTTSettings) {
         mqtt?.stop(); usingMQTT = true; wantsScanning = false; central.stopScan(); scanning = false
         let input = MQTTInput(settings: config)
-        input.onReading = { [weak self] sample in self?.receive(id: sample.identity, reading: sample.reading, rssi: sample.rssi) }
+        input.onReading = { [weak self] sample in self?.receive(id: sample.identity, reading: sample.reading, rssi: sample.rssi, source: .mqtt) }
         input.onStatus = { [weak self] message in self?.status = message }
         mqtt = input; input.start()
     }
@@ -71,16 +74,18 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
         guard !usingMQTT, let data = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
               let decoded = AdvertisementDecoder.decode(data, peripheralID: peripheral.identifier.uuidString, rssi: RSSI.intValue) else { return }
         let id = decoded.mac ?? peripheral.identifier.uuidString
-        receive(id: id, reading: decoded.reading, rssi: RSSI.intValue)
+        receive(id: id, reading: decoded.reading, rssi: RSSI.intValue, source: .bluetooth)
     }
-    func receive(id: String, reading: Reading, rssi: Int) {
-        if let index = sensors.firstIndex(where: { $0.id == id }) {
-            guard reading.date > sensors[index].lastSeen else { return }
-            sensors[index].receive(reading, rssi: rssi)
+    func receive(id: String, reading: Reading, rssi: Int, source: ReadingSource) {
+        let index: Int
+        if let existing = sensors.firstIndex(where: { $0.id == id }) {
+            guard reading.date > sensors[existing].lastSeen else { return }
+            sensors[existing].receive(reading, rssi: rssi); index = existing
         } else {
             var sensor = Sensor(id: id, date: reading.date, rssi: rssi, reading: reading)
-            sensor.receive(reading, rssi: rssi); sensors.append(sensor)
+            sensor.receive(reading, rssi: rssi); sensors.append(sensor); index = sensors.count - 1
         }
+        onReading?(sensors[index], reading, rssi, source)
         scheduleSave()
     }
     func downloadHistory(_ id: String) {
@@ -103,6 +108,7 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     func rename(_ id: String, to name: String) {
         guard let i = sensors.firstIndex(where: { $0.id == id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         sensors[i].name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)); persist()
+        onRename?(sensors[i])
     }
     func favorite(_ id: String) {
         guard let i = sensors.firstIndex(where: { $0.id == id }) else { return }

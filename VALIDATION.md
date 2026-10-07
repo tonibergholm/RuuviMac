@@ -73,8 +73,15 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
 - `xcodebuild -version`: Xcode 27.0, build version 27A266a.
 - `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
 
-Smoke test with a RuuviTag, pending user smoke test (not run here; it needs
-GUI interaction, a nearby tag and a logout):
+User smoke test on October 7, 2026, with a nearby RuuviTag, using the v0.5
+build: the menu lists tags with temperature and humidity; closing the window
+hides the Dock icon while the menu keeps updating; `open -a RuuviMac` restores
+one window with the Dock icon; clicking a menu row selects the tag and Open
+RuuviMac twice gives one window; quitting from the menu and relaunching keeps
+the latest readings; enabling Open at login registered the app as enabled and
+allowed (`sfltool dumpbtm`), with no approval prompt. Items 4 (logout and
+login), 5 (sleep and wake), 6 (10 minutes windowless) and 9 (unreadable
+archive) were not run. The list as planned:
 
 1. Close the window. Dock icon gone, menu icon stays, menu readings update,
    history sample count rises after a few minutes.
@@ -93,3 +100,61 @@ GUI interaction, a nearby tag and a logout):
 
 Login item registration and the Login Items approval prompt have not been
 observed on a real login.
+
+## Home Assistant bridge v0.5
+
+- `RUUVI_MQTT_TEST_PORT=18884 swift test --build-system native` against a
+  local mosquitto 2.1.2 (127.0.0.1, anonymous): 47 tests executed, 2 skipped
+  (the Keychain store tests), zero failures. The publisher loopback test then
+  passed 5 more consecutive runs. It covers config before state, the retained
+  config seen by a later subscriber, the birth message, the Last Will after an
+  abrupt drop, reconnect, an acknowledged removal, and retained `offline` on
+  ordered stop. The broker log showed both the abrupt close and the clean
+  DISCONNECT. The existing real-broker MQTT input test also passed.
+- Not covered by automation: the bridge controller (settings, Keychain,
+  ownership), Home Assistant itself, and quit inside the running app.
+- Keychain store tests (`RUUVI_KEYCHAIN_TESTS=1`): run once during Task 3,
+  2 passed with no prompt. The test runner is unsandboxed, so the access
+  behavior of the sandboxed ad-hoc signed app is untested. They were not
+  rerun for this section.
+- Accepted deviation: MQTTNIO 2.13.0 sends the Last Will at QoS 0 (retained).
+- `swift --version`: Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+- `xcodebuild -version`: Xcode 27.0, build version 27A266a.
+- `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
+
+App check against the local mosquitto broker on October 7, 2026 (no Home
+Assistant available): the running app was configured through the settings
+sheet for 127.0.0.1:18884 without credentials. A topic watcher saw `online` on
+`ruuvimac/<bridge>/status`, the tag's discovery config followed by its state,
+an empty retained config after Remove from Home Assistant, and retained
+`offline` with a clean disconnect on quit. Afterwards only the retained
+`offline` remained, and the saved ledger had the tag switched off with no
+pending removal. Not checked: Home Assistant's handling of the payloads, the
+Keychain password path, and the items below.
+
+Manual checks with a Home Assistant broker, not run (no Home Assistant available):
+
+1. Settings: enable with the broker details. Status reaches "Connected to the
+   Home Assistant broker". A wrong password shows the credentials message and
+   keeps retrying. Pending user test.
+2. Home Assistant shows one device per nearby tag with six entities; values
+   match the app. Pending user test.
+3. Rename a tag. The device name changes and no second device appears.
+   Pending user test.
+4. Restart Home Assistant. Devices and values return within about a minute.
+   Pending user test.
+5. Quit RuuviMac while connected. It quits within about 2 seconds, entities
+   become unavailable, and relaunch shows the latest readings. Pending user test.
+6. Turn off Wi-Fi or stop the broker, then restore it. Status shows retrying,
+   then connected; values resume. Pending user test.
+7. Turn off publishing for one tag. Its entities go unavailable after about
+   ten minutes; the device stays. Pending user test.
+8. Remove one tag while the broker is unreachable, then relaunch with the
+   broker reachable. The device disappears. Pending user test.
+9. Keychain across rebuilds, normal launch and login item: whether macOS
+   prompts, what Always Allow does, what Deny plus Try again does, and that
+   menu readings keep updating during an unanswered prompt. Pending user test.
+10. Two bridges: use a second Mac, or launch a second copy with
+    `open -n RuuviMac.app --args -ha.bridgeID 11111111` (it shares the ledger
+    and sensor archive with the first copy). Quitting one must not mark the
+    other's tags unavailable. Pending user test.

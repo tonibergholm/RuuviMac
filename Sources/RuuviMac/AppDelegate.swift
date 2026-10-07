@@ -1,8 +1,11 @@
 import AppKit
 import SwiftUI
+import RuuviMQTT
 
 final class SelectionModel: ObservableObject {
     @Published var selected: String?
+    /// Set by the menu to open the Home Assistant sheet in the main window.
+    @Published var showHomeAssistant = false
 }
 
 /// Owns objects that must outlive the main window, and switches the Dock icon with it.
@@ -10,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = SensorStore()
     let selection = SelectionModel()
     let loginItem = LoginItem()
+    let homeAssistant = HomeAssistantBridge()
     private var activeObserver: NSObjectProtocol?
     private var activity: NSObjectProtocol?
     private weak var mainWindow: NSWindow?
@@ -18,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var startHidden = false { didSet { hideIfNeeded() } }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.onReading = { [weak self] sensor, reading, rssi, source in
+            self?.homeAssistant.receive(sensor: sensor, reading: reading, rssi: rssi, source: source)
+        }
+        store.onRename = { [weak self] sensor in self?.homeAssistant.renamed(sensor) }
+        homeAssistant.start()
         // Keeps timers and scan delivery on time while windowless. Idle sleep stays allowed.
         activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
                                                          reason: "Collecting RuuviTag readings")
@@ -37,8 +46,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // The Home Assistant publisher adds its bounded offline message here later.
-        .terminateNow
+        guard homeAssistant.connected else { return .terminateNow }
+        // Publish retained offline first. Both paths reply on the main run loop in modal-panel mode,
+        // after this method has returned, and never later than 2 seconds.
+        var replied = false
+        let reply = {
+            guard !replied else { return }
+            replied = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        homeAssistant.shutdown(reply)
+        // Hard bound for quit; scheduled in modal-panel mode so it fires while AppKit waits.
+        MainRunLoop.after(2, reply)
+        return .terminateLater
     }
     func applicationWillTerminate(_ notification: Notification) {
         store.persist()

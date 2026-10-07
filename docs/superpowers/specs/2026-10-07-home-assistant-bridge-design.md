@@ -13,6 +13,9 @@ RuuviMac publishes the RuuviTags it hears over Bluetooth to a Home Assistant MQT
 - Only tags identified by MAC are published. The CoreBluetooth UUID fallback can change and would leave orphan entities.
 - Several Macs may bridge to one broker. Each Mac has its own availability topic. Each tag must be published by exactly one Mac. The user enforces this with a per-tag publish switch. Tags heard by two Macs are not merged.
 - The broker password is stored in the user's legacy file-based Keychain. MQTT input passwords stay session-only, as documented in v0.2.
+- MQTTNIO 2.13.0 sends the Last Will at QoS 0 regardless of the requested QoS; the retain flag is kept. Accepted, since retained `offline` is what Home Assistant reads.
+- `ha.hasPassword` false is the explicit marker for username-only or anonymous connections.
+- A tag's publish choice is recorded the first time this Mac hears it over Bluetooth while Home Assistant publishing is enabled, from "Publish newly discovered tags" at that moment; changing that setting does not flip tags already seen. "Remove all devices from this broker" covers only tags this Mac still publishes.
 - Home Assistant's default birth topic and payload (`<prefix>/status`, `online`) are assumed. A customized birth topic only loses the republish-on-restart trigger. Retained configs still work.
 - Discovery format follows the Home Assistant MQTT integration docs (https://www.home-assistant.io/integrations/mqtt/), checked 2026-10-07: device discovery topic `<prefix>/device/<object_id>/config`, required `dev` and `o` maps, entities under `cmps` each with `p` and `unique_id`, retained configs, birth message, removal by empty retained config. The Sol review confirmed against Home Assistant's `discovery.py` that the abbreviations below are valid and that top-level `stat_t` and `avty_t` are inherited by components.
 
@@ -110,7 +113,7 @@ The sensor detail view has, when the publisher is enabled and the tag has a MAC 
 - The publisher sends an empty retained payload at QoS 1 to the config topic. The pending entry is cleared only when the PUBACK arrives.
 - If the publish fails or the app quits first, the pending removal stays. It is retried on every connect to a broker matching its host, port and prefix, before any other config publishing.
 - The detail view shows "Removing…" while pending and "Removed" after acknowledgement.
-- "Remove all devices from this broker" queues a removal for every tag this Mac has published to the current broker and prefix (tracked as a persisted set per broker).
+- "Remove all devices from this broker" queues a removal for every tag this Mac has published to the current broker and prefix and still publishes (tracked as a persisted set per broker). Tags switched off here, for example handed to another Mac, are left alone.
 
 ### Shutdown
 

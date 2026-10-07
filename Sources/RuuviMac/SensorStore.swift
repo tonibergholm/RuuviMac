@@ -12,18 +12,24 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     @Published var usingMQTT = false
     @Published var downloadingTag: String?
     @Published var logStatus = ""
+    @Published var savingPaused = false
     private var logReader: TagLogReader?
     private var mqtt: MQTTInput?
     private var wantsScanning = true
     private var central: CBCentralManager!
     private var saveTask: DispatchWorkItem?
-    private let archive: SensorArchive
+    private let archive: GuardedArchive
 
     override init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        archive = SensorArchive(url: support.appendingPathComponent("RuuviMac/sensors.json"))
+        archive = GuardedArchive(url: support.appendingPathComponent("RuuviMac/sensors.json"))
         super.init()
-        do { sensors = try archive.load() } catch { self.error = "Could not load saved data: \(error.localizedDescription)" }
+        switch archive.load() {
+        case .success(let saved): sensors = saved
+        case .failure(let failure):
+            savingPaused = true
+            error = "Saved data could not be read (\(failure.localizedDescription)). Saving is paused so the file is not overwritten. Choose Move aside and start fresh to keep the old file and save new readings."
+        }
         central = CBCentralManager(delegate: self, queue: .main)
     }
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -109,5 +115,13 @@ final class SensorStore: NSObject, ObservableObject, CBCentralManagerDelegate {
     }
     func persist() {
         do { try archive.save(sensors) } catch { self.error = "Could not save data: \(error.localizedDescription)" }
+    }
+    func moveArchiveAside() {
+        do {
+            let moved = try archive.moveAside(now: Date())
+            savingPaused = false; error = nil
+            status = "Old data kept as \(moved.lastPathComponent)"
+            persist()
+        } catch { self.error = "Could not move the saved data aside: \(error.localizedDescription)" }
     }
 }

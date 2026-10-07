@@ -76,3 +76,28 @@ public struct SensorArchive {
         try JSONEncoder().encode(sensors).write(to: url, options: .atomic)
     }
 }
+
+/// Refuses to overwrite an archive that failed to load, so unreadable data is never replaced
+/// by whatever was collected since launch. `moveAside` keeps the old file and re-enables saving.
+public final class GuardedArchive {
+    private let archive: SensorArchive
+    public private(set) var writable = true
+    public init(url: URL) { archive = SensorArchive(url: url) }
+    public func load() -> Result<[Sensor], Error> {
+        do { let sensors = try archive.load(); writable = true; return .success(sensors) }
+        catch { writable = false; return .failure(error) }
+    }
+    @discardableResult public func save(_ sensors: [Sensor]) throws -> Bool {
+        guard writable else { return false }
+        try archive.save(sensors); return true
+    }
+    public func moveAside(now: Date) throws -> URL {
+        let target = archive.url.deletingLastPathComponent()
+            .appendingPathComponent(archive.url.lastPathComponent + ".unreadable-\(Int(now.timeIntervalSince1970))")
+        if FileManager.default.fileExists(atPath: archive.url.path) {
+            try FileManager.default.moveItem(at: archive.url, to: target)
+        }
+        writable = true
+        return target
+    }
+}

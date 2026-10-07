@@ -57,6 +57,10 @@ struct ContentView: View {
             HStack {
                 Circle().fill((store.scanning || store.status.hasPrefix("MQTT subscribed")) ? Color.green : Color.secondary).frame(width: 7, height: 7)
                 Text(store.status).font(.caption)
+                if store.savingPaused {
+                    Text("Saving paused").font(.caption).foregroundStyle(.orange)
+                    Button("Move aside and start fresh") { store.moveArchiveAside() }
+                }
                 Spacer()
                 Button("MQTT settings…") { mqttSettings = true }.disabled(store.downloadingTag != nil)
                 Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }.disabled(store.downloadingTag != nil)
@@ -64,6 +68,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
         .alert("Storage problem", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
+            if store.savingPaused { Button("Move aside and start fresh") { store.moveArchiveAside() } }
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
     }

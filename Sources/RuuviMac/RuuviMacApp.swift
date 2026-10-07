@@ -79,7 +79,16 @@ struct ContentView: View {
             }.padding(12).background(.bar)
         }
         .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
-        .sheet(isPresented: $selection.showHomeAssistant) { HomeAssistantSettingsView(bridge: homeAssistant) }
+        .sheet(isPresented: $selection.showHomeAssistant, onDismiss: { selection.showHomeAssistant = false }) {
+            HomeAssistantSettingsView(bridge: homeAssistant)
+        }
+        .onChange(of: selection.showHomeAssistant) { show in
+            // One sheet at a time: close the MQTT sheet, then present on the next turn.
+            guard show, mqttSettings else { return }
+            mqttSettings = false
+            selection.showHomeAssistant = false
+            DispatchQueue.main.async { selection.showHomeAssistant = true }
+        }
         .alert("Storage problem", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             if store.savingPaused { Button("Move aside and start fresh") { store.moveArchiveAside() } }
             Button("OK") { store.error = nil }

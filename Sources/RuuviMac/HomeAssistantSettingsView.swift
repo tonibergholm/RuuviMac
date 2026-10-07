@@ -28,7 +28,11 @@ struct HomeAssistantSettingsView: View {
                 Toggle("Use TLS with trusted certificates", isOn: $tls)
                 TextField("Username", text: $username)
                 SecureField(bridge.hasPassword ? "Password (leave empty to keep the saved one)" : "Password (optional)", text: $password)
-                if bridge.hasPassword { Toggle("Remove the saved password", isOn: $clearPassword) }
+                    .disabled(clearPassword)
+                if bridge.hasPassword {
+                    Toggle("Remove the saved password", isOn: $clearPassword)
+                        .onChange(of: clearPassword) { on in if on { password = "" } }
+                }
                 TextField("Discovery prefix", text: $prefix)
                 Toggle("Publish newly discovered tags", isOn: $publishNewTags)
             }
@@ -45,7 +49,7 @@ struct HomeAssistantSettingsView: View {
                     .disabled(!bridge.enabled)
                 Spacer()
                 if bridge.saving { ProgressView().controlSize(.small) }
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { dismiss() }.disabled(bridge.saving)
                 Button("Save") {
                     issue = nil
                     let settings = HomeAssistantSettings(host: host.trimmingCharacters(in: .whitespacesAndNewlines), port: port,
@@ -60,6 +64,7 @@ struct HomeAssistantSettingsView: View {
             }
         }
         .padding(24).frame(width: 540)
+        .interactiveDismissDisabled(bridge.saving)
         .onAppear {
             let s = bridge.settings
             enabled = bridge.enabled; host = s.host; port = s.port; tls = s.tls; username = s.username

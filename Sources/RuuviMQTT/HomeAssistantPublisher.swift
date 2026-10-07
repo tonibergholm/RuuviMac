@@ -83,7 +83,7 @@ public final class HomeAssistantPublisher {
                         self.onStatus?("Connected to the Home Assistant broker")
                         self.onConnected?()
                     case .failure(let error):
-                        self.failed(c, message: Self.describe(error))
+                        self.failed(c, message: Self.describe(error), delay: Self.retryDelay(for: error, current: self.delay))
                     }
                 }
             }
@@ -99,13 +99,20 @@ public final class HomeAssistantPublisher {
         return "Could not reach the Home Assistant broker; check host, port and TLS. Retrying…"
     }
 
-    /// Drops the current client and schedules a reconnect with backoff.
-    private func failed(_ c: MQTTClient?, message: String) {
+    /// Rejected credentials will not fix themselves, so retry them at the 30 second ceiling.
+    static func retryDelay(for error: Error, current: Double) -> Double {
+        if case MQTTError.connectionError(let code) = error, code == .badUserNameOrPassword || code == .notAuthorized { return 30 }
+        return current
+    }
+
+    /// Drops the current client and schedules a reconnect with backoff. `delay` overrides the next wait.
+    private func failed(_ c: MQTTClient?, message: String, delay override: Double? = nil) {
         guard let c, client === c, !stopped else { return }
         client = nil
         if connected { connected = false; onDisconnected?() }
         configured = []
         onStatus?(message)
+        if let override { delay = override }
         let wait = delay
         delay = min(delay * 2, 30)
         c.removeCloseListener(named: "reconnect")
@@ -168,9 +175,11 @@ public final class HomeAssistantPublisher {
 
     /// Ordered shutdown: stop retries, publish retained offline and wait for the ack, disconnect, shut down.
     /// `closed` runs exactly once on the main run loop, never synchronously, after every client this publisher
-    /// opened has closed, or after `timeout` when the deadline forces it.
-    /// If the broker has not acknowledged within `timeout` seconds the socket is closed anyway and the broker's
-    /// Last Will marks this bridge offline. Callers that need a hard time bound (quit) add their own deadline.
+    /// opened has closed. When a client is still connected and the broker has not acknowledged the offline
+    /// message within `timeout` seconds, the socket is force-closed and completion follows the close; the
+    /// broker's Last Will then marks this bridge offline. When only an earlier client is still closing,
+    /// completion waits for that close with no deadline of its own. Callers that need a hard time bound
+    /// (quit) add their own deadline.
     public func stop(timeout: TimeInterval = 2, closed: @escaping () -> Void) {
         stopped = true; retry?.cancel(); retry = nil
         let wasConnected = connected
@@ -185,7 +194,6 @@ public final class HomeAssistantPublisher {
         guard let c = client else {
             if closing.isEmpty { MainRunLoop.perform(complete); return }
             closedWaiters.append(complete)
-            deadline = MainRunLoop.after(timeout) { complete() }
             return
         }
         client = nil

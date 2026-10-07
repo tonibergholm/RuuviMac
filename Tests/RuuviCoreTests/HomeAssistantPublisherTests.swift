@@ -124,4 +124,16 @@ final class HomeAssistantPublisherTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(2.5))
         XCTAssertEqual(count, 1, "stop must complete exactly once")
     }
+
+    func testDescribeCredentialErrors() {
+        XCTAssertTrue(HomeAssistantPublisher.describe(MQTTError.connectionError(.badUserNameOrPassword)).contains("username or password"))
+        XCTAssertTrue(HomeAssistantPublisher.describe(MQTTError.connectionError(.notAuthorized)).contains("username or password"))
+    }
+
+    func testCredentialErrorsRetryAtCeiling() {
+        XCTAssertEqual(HomeAssistantPublisher.retryDelay(for: MQTTError.connectionError(.badUserNameOrPassword), current: 1), 30)
+        XCTAssertEqual(HomeAssistantPublisher.retryDelay(for: MQTTError.connectionError(.notAuthorized), current: 2), 30)
+        XCTAssertEqual(HomeAssistantPublisher.retryDelay(for: MQTTError.connectionError(.serverUnavailable), current: 4), 4)
+        XCTAssertEqual(HomeAssistantPublisher.retryDelay(for: MQTTError.noConnection, current: 8), 8)
+    }
 }

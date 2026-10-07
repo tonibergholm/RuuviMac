@@ -134,5 +134,7 @@ Manual checks with a Home Assistant broker, all pending user test (not run here)
 9. Keychain across rebuilds, normal launch and login item: whether macOS
    prompts, what Always Allow does, what Deny plus Try again does, and that
    menu readings keep updating during an unanswered prompt. Pending user test.
-10. Two bridges with different `ha.bridgeID` values: quitting one does not
-    mark the other's tags unavailable. Pending user test.
+10. Two bridges: use a second Mac, or launch a second copy with
+    `open -n RuuviMac.app --args -ha.bridgeID 11111111` (it shares the ledger
+    and sensor archive with the first copy). Quitting one must not mark the
+    other's tags unavailable. Pending user test.

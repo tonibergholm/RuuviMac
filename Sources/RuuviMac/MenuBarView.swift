@@ -41,7 +41,12 @@ struct MenuBarView: View {
         if homeAssistant.enabled { Text("Home Assistant: \(homeAssistant.status)") }
         if store.savingPaused { Text("Saving paused") }
         Divider()
-        Button("Home Assistant…") { open(select: nil); selection.showHomeAssistant = true }
+        Button("Home Assistant…") {
+            open(select: nil)
+            // Reset first so a sheet left over from an earlier state cannot swallow the request.
+            selection.showHomeAssistant = false
+            DispatchQueue.main.async { selection.showHomeAssistant = true }
+        }
         Button("Open RuuviMac…") { open(select: nil) }
         Toggle("Open at login", isOn: Binding(get: { loginItem.registered }, set: { loginItem.set($0) }))
         if loginItem.needsApproval { Button("Approve in Login Items…") { loginItem.openSettings() } }

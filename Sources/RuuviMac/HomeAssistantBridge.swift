@@ -4,7 +4,8 @@ import RuuviCore
 import RuuviMQTT
 
 /// Owns Home Assistant settings, the ownership ledger, the Keychain password and the publisher lifecycle.
-/// Main queue only. Keychain work runs on `keychainQueue`.
+/// Main queue only. Keychain work runs off main: reads on `keychainReadQueue`, writes on `keychainWriteQueue`,
+/// so a slow read (Keychain prompt) cannot block a save.
 final class HomeAssistantBridge: ObservableObject {
     @Published private(set) var status = "Home Assistant publishing is off"
     @Published private(set) var enabled: Bool
@@ -19,7 +20,10 @@ final class HomeAssistantBridge: ObservableObject {
     let bridgeID: String
     private let defaults: UserDefaults
     private let keychain = KeychainPasswordStore()
-    private let keychainQueue = DispatchQueue(label: "org.ruuvimac.keychain")
+    private let keychainReadQueue = DispatchQueue(label: "org.ruuvimac.keychain.read")
+    private let keychainWriteQueue = DispatchQueue(label: "org.ruuvimac.keychain.write")
+    /// Shown while publishing is off, so a reset ledger is not silently forgotten.
+    private var notice: String?
     private let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     private var publisher: HomeAssistantPublisher?
     private var stopping: HomeAssistantPublisher?
@@ -34,12 +38,23 @@ final class HomeAssistantBridge: ObservableObject {
         self.defaults = defaults
         settings = defaults.data(forKey: "ha.settings").flatMap { try? JSONDecoder().decode(HomeAssistantSettings.self, from: $0) }
             ?? HomeAssistantSettings(host: "homeassistant.local")
-        ledger = defaults.data(forKey: "ha.ledger").flatMap { try? JSONDecoder().decode(HomeAssistantLedger.self, from: $0) }
-            ?? HomeAssistantLedger()
+        if let data = defaults.data(forKey: "ha.ledger") {
+            if let decoded = try? JSONDecoder().decode(HomeAssistantLedger.self, from: data) {
+                ledger = decoded
+            } else {
+                // Keep the first unreadable copy; never overwrite an existing backup.
+                if defaults.data(forKey: "ha.ledger.unreadable") == nil { defaults.set(data, forKey: "ha.ledger.unreadable") }
+                ledger = HomeAssistantLedger()
+                notice = "Saved Home Assistant ownership data could not be read; publishing choices were reset. A copy was kept."
+            }
+        } else {
+            ledger = HomeAssistantLedger()
+        }
         enabled = defaults.bool(forKey: "ha.enabled")
         hasPassword = defaults.bool(forKey: "ha.hasPassword")
         if let saved = defaults.string(forKey: "ha.bridgeID") { bridgeID = saved }
         else { bridgeID = HomeAssistantDiscovery.newBridgeID(); defaults.set(bridgeID, forKey: "ha.bridgeID") }
+        if let notice { status = notice }
     }
 
     private static func describe(_ error: Error) -> String {
@@ -54,13 +69,13 @@ final class HomeAssistantBridge: ObservableObject {
         generation += 1
         let current = generation, config = settings
         keychainProblem = false
-        guard enabled else { status = "Home Assistant publishing is off"; return }
+        guard enabled else { status = notice ?? "Home Assistant publishing is off"; return }
         if let problem = config.validationError { status = problem; return }
         // ha.hasPassword false means username-only or anonymous; the Keychain is not read.
         guard !config.username.isEmpty, hasPassword else { connect(config, password: nil); return }
         status = "Reading the broker password from the Keychain…"
         let store = keychain
-        keychainQueue.async {
+        keychainReadQueue.async {
             let result = Result { try store.read(account: config.account) }
             DispatchQueue.main.async {
                 guard current == self.generation, self.publisher == nil, self.stopping == nil else { return }
@@ -97,8 +112,10 @@ final class HomeAssistantBridge: ObservableObject {
         p.onBirth = { [weak self, weak p] in
             guard let self, let p, self.publisher === p else { return }
             self.router.throttle.resetAll()
-            for (key, name) in self.names where self.ledger.isPublishing(key, publishNewTags: config.publishNewTags) {
-                p.publishConfig(tag: .init(macKey: key, name: name))
+            // Only tags already published to this broker; others send their config with their first state.
+            for key in self.ledger.published[config.brokerKey] ?? []
+            where self.ledger.isPublishing(key, publishNewTags: config.publishNewTags) {
+                if let name = self.names[key] { p.publishConfig(tag: .init(macKey: key, name: name)) }
             }
         }
         p.onRemoved = { [weak self] removal in
@@ -107,9 +124,15 @@ final class HomeAssistantBridge: ObservableObject {
             next.completeRemoval(removal)
             self.ledger = next; self.saveLedger()
             self.removed.insert(removal.macKey)
+            self.refreshPublishedCount()
         }
         publisher = p
         p.start()
+    }
+
+    private func refreshPublishedCount() {
+        guard connected, let p = publisher else { return }
+        status = "Connected to the Home Assistant broker · \(ledger.published[p.settings.brokerKey]?.count ?? 0) tags published"
     }
 
     /// Stops the running publisher, if any, and starts again with the current settings once it has stopped.
@@ -154,11 +177,13 @@ final class HomeAssistantBridge: ObservableObject {
             completion("Enter the password again for the new username, host or port."); return
         }
         let commit: (Bool?) -> Void = { [weak self] passwordStored in
-            guard let self, !self.isShutDown else { return }
+            guard let self else { return }
+            // Always persist, even during quit, so a save that finished its Keychain write is not lost.
             self.settings = new; self.enabled = newEnabled
             if let stored = passwordStored { self.hasPassword = stored; self.defaults.set(stored, forKey: "ha.hasPassword") }
             self.defaults.set(try? JSONEncoder().encode(new), forKey: "ha.settings")
             self.defaults.set(newEnabled, forKey: "ha.enabled")
+            guard !self.isShutDown else { return }
             self.restart()
             completion(nil)
         }
@@ -166,7 +191,7 @@ final class HomeAssistantBridge: ObservableObject {
         if noPassword {
             guard hadPassword else { commit(false); return }
             saving = true
-            keychainQueue.async {
+            keychainWriteQueue.async {
                 let result = Result { try store.delete(account: oldAccount) }
                 DispatchQueue.main.async {
                     self.saving = false
@@ -179,13 +204,17 @@ final class HomeAssistantBridge: ObservableObject {
         } else if !password.isEmpty {
             saving = true
             let account = new.account
-            keychainQueue.async {
+            keychainWriteQueue.async {
                 let result = Result { try store.save(password, account: account) }
-                if case .success = result, hadPassword, account != oldAccount { try? store.delete(account: oldAccount) }
                 DispatchQueue.main.async {
                     self.saving = false
                     switch result {
-                    case .success: commit(true)
+                    case .success:
+                        commit(true)
+                        // Best effort, after the new settings are persisted. The write queue is serial.
+                        if hadPassword, account != oldAccount {
+                            self.keychainWriteQueue.async { try? store.delete(account: oldAccount) }
+                        }
                     case .failure(let error): completion("Could not save the password in the Keychain: " + Self.describe(error))
                     }
                 }
@@ -251,6 +280,7 @@ final class HomeAssistantBridge: ObservableObject {
         ledger = next; saveLedger()
         removed.remove(key)
         publisher?.remove(removal)
+        refreshPublishedCount()
     }
 
     func removeAll() {
@@ -258,6 +288,7 @@ final class HomeAssistantBridge: ObservableObject {
         let removals = next.queueRemoveAll(settings: publisher?.settings ?? settings)
         ledger = next; saveLedger()
         for removal in removals { removed.remove(removal.macKey); publisher?.remove(removal) }
+        refreshPublishedCount()
     }
 
     private func saveLedger() { defaults.set(try? JSONEncoder().encode(ledger), forKey: "ha.ledger") }

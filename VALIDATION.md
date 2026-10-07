@@ -80,11 +80,14 @@ GUI interaction, a nearby tag and a logout):
    history sample count rises after a few minutes.
 2. Quit from the menu with the window closed. Relaunch. Latest reading present.
 3. "Open RuuviMac…" restores the window and the Dock icon.
-4. Enable open at login, log out and in. App starts windowless and collects.
+4. Enable open at login, log out and in, twice: once with "Reopen windows when
+   logging back in" checked and once unchecked. App starts windowless and collects.
 5. Sleep and wake. Scanning resumes and readings update.
 6. Windowless for 10 minutes. `stat -f %m` on the archive shows saves continuing.
 7. Clicking a tag row selects it in the window. "Open RuuviMac…" twice gives one window.
-8. Replace a copy of `sensors.json` with `{not json`, launch, let readings
+8. Close the window, then run `open -a RuuviMac` (or open it from Finder). The
+   window, Dock icon and menu bar all return.
+9. Replace a copy of `sensors.json` with `{not json`, launch, let readings
    arrive, quit. `shasum` of the file is unchanged. Skipped deliberately to
    avoid touching the real archive; run it on a copy and restore afterward.
 

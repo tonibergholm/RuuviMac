@@ -21,12 +21,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keeps timers and scan delivery on time while windowless. Idle sleep stays allowed.
         activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
                                                          reason: "Collecting RuuviTag readings")
-        if LaunchReason.isLoginItemLaunch() { startHidden = true }
+        if LaunchReason.isLoginItemLaunch() {
+            NSApp.setActivationPolicy(.accessory)
+            startHidden = true
+        }
         // Returning from System Settings → Login Items should show the new state.
         activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
             self?.loginItem.refresh()
         }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -50,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         ]
         hideIfNeeded()
+        if window.isVisible { NSApp.setActivationPolicy(.regular) }
     }
     private func hideIfNeeded() {
         guard startHidden, let mainWindow else { return }
@@ -59,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// Called before `openWindow(id: "main")` so the Dock icon is back when the window appears.
     func showMainWindow() {
+        startHidden = false
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }

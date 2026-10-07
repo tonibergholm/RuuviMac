@@ -7,8 +7,11 @@ final class Ticker: ObservableObject {
     @Published private(set) var now = Date()
     private var timer: Timer?
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.now = Date() }
+        let timer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in self?.now = Date() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
+    deinit { timer?.invalidate() }
 }
 
 struct MenuBarView: View {
@@ -38,6 +41,8 @@ struct MenuBarView: View {
         Divider()
         Button("Open RuuviMac…") { open(select: nil) }
         Toggle("Open at login", isOn: Binding(get: { loginItem.enabled }, set: { loginItem.set($0) }))
+        if loginItem.needsApproval { Button("Approve in Login Items…") { loginItem.openSettings() } }
+        if let message = loginItem.message { Text(message) }
         Button("Quit RuuviMac") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 

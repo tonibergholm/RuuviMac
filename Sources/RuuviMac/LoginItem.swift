@@ -9,8 +9,11 @@ final class LoginItem: ObservableObject {
     init() { refresh() }
     func refresh() {
         let status = SMAppService.mainApp.status
-        enabled = status == .enabled
-        needsApproval = status == .requiresApproval
+        let isEnabled = status == .enabled
+        let isPending = status == .requiresApproval
+        if enabled != isEnabled { enabled = isEnabled }
+        if needsApproval != isPending { needsApproval = isPending }
+        if isEnabled, message != nil { message = nil }
     }
     func set(_ on: Bool) {
         do {

@@ -18,6 +18,7 @@ struct MenuBarView: View {
     @ObservedObject var store: SensorStore
     @ObservedObject var selection: SelectionModel
     @ObservedObject var loginItem: LoginItem
+    @ObservedObject var homeAssistant: HomeAssistantBridge
     let delegate: AppDelegate
     @StateObject private var ticker = Ticker()
     @Environment(\.openWindow) private var openWindow
@@ -37,8 +38,10 @@ struct MenuBarView: View {
         }
         Divider()
         Text(store.status)
+        if homeAssistant.enabled { Text("Home Assistant: \(homeAssistant.status)") }
         if store.savingPaused { Text("Saving paused") }
         Divider()
+        Button("Home Assistant…") { open(select: nil); selection.showHomeAssistant = true }
         Button("Open RuuviMac…") { open(select: nil) }
         Toggle("Open at login", isOn: Binding(get: { loginItem.registered }, set: { loginItem.set($0) }))
         if loginItem.needsApproval { Button("Approve in Login Items…") { loginItem.openSettings() } }

@@ -4,6 +4,8 @@ import RuuviMQTT
 
 final class SelectionModel: ObservableObject {
     @Published var selected: String?
+    /// Set by the menu to open the Home Assistant sheet in the main window.
+    @Published var showHomeAssistant = false
 }
 
 /// Owns objects that must outlive the main window, and switches the Dock icon with it.

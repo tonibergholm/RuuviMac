@@ -8,7 +8,7 @@ struct RuuviMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         Window("RuuviMac", id: "main") {
-            ContentView(store: delegate.store, selection: delegate.selection)
+            ContentView(store: delegate.store, selection: delegate.selection, loginItem: delegate.loginItem)
                 .frame(minWidth: 800, minHeight: 540)
                 .background(WindowAccessor { delegate.registerMainWindow($0) })
         }
@@ -18,6 +18,7 @@ struct RuuviMacApp: App {
 struct ContentView: View {
     @ObservedObject var store: SensorStore
     @ObservedObject var selection: SelectionModel
+    @ObservedObject var loginItem: LoginItem
     @State private var favoritesOnly = false
     @State private var mqttSettings = false
     var body: some View {
@@ -59,6 +60,12 @@ struct ContentView: View {
                     Button("Move aside and start fresh") { store.moveArchiveAside() }
                 }
                 Spacer()
+                Toggle("Open at login", isOn: Binding(get: { loginItem.enabled }, set: { loginItem.set($0) }))
+                    .toggleStyle(.checkbox)
+                if loginItem.needsApproval {
+                    Button("Approve in Login Items…") { loginItem.openSettings() }
+                }
+                if let message = loginItem.message { Text(message).font(.caption).foregroundStyle(.red) }
                 Button("MQTT settings…") { mqttSettings = true }.disabled(store.downloadingTag != nil)
                 Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }.disabled(store.downloadingTag != nil)
             }.padding(12).background(.bar)

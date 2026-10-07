@@ -9,6 +9,8 @@ final class SelectionModel: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = SensorStore()
     let selection = SelectionModel()
+    let loginItem = LoginItem()
+    private var activeObserver: NSObjectProtocol?
     private var activity: NSObjectProtocol?
     private weak var mainWindow: NSWindow?
     private var windowObservers: [NSObjectProtocol] = []
@@ -19,6 +21,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keeps timers and scan delivery on time while windowless. Idle sleep stays allowed.
         activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
                                                          reason: "Collecting RuuviTag readings")
+        if LaunchReason.isLoginItemLaunch() { startHidden = true }
+        // Returning from System Settings → Login Items should show the new state.
+        activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+            self?.loginItem.refresh()
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

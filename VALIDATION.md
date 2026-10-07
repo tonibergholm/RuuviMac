@@ -73,8 +73,15 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
 - `xcodebuild -version`: Xcode 27.0, build version 27A266a.
 - `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
 
-Smoke test with a RuuviTag, pending user smoke test (not run here; it needs
-GUI interaction, a nearby tag and a logout):
+User smoke test on October 7, 2026, with a nearby RuuviTag, using the v0.5
+build: the menu lists tags with temperature and humidity; closing the window
+hides the Dock icon while the menu keeps updating; `open -a RuuviMac` restores
+one window with the Dock icon; clicking a menu row selects the tag and Open
+RuuviMac twice gives one window; quitting from the menu and relaunching keeps
+the latest readings; enabling Open at login registered the app as enabled and
+allowed (`sfltool dumpbtm`), with no approval prompt. Items 4 (logout and
+login), 5 (sleep and wake), 6 (10 minutes windowless) and 9 (unreadable
+archive) were not run. The list as planned:
 
 1. Close the window. Dock icon gone, menu icon stays, menu readings update,
    history sample count rises after a few minutes.
@@ -115,7 +122,17 @@ observed on a real login.
 - `xcodebuild -version`: Xcode 27.0, build version 27A266a.
 - `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
 
-Manual checks with a Home Assistant broker, all pending user test (not run here):
+App check against the local mosquitto broker on October 7, 2026 (no Home
+Assistant available): the running app was configured through the settings
+sheet for 127.0.0.1:18884 without credentials. A topic watcher saw `online` on
+`ruuvimac/<bridge>/status`, the tag's discovery config followed by its state,
+an empty retained config after Remove from Home Assistant, and retained
+`offline` with a clean disconnect on quit. Afterwards only the retained
+`offline` remained, and the saved ledger had the tag switched off with no
+pending removal. Not checked: Home Assistant's handling of the payloads, the
+Keychain password path, and the items below.
+
+Manual checks with a Home Assistant broker, not run (no Home Assistant available):
 
 1. Settings: enable with the broker details. Status reaches "Connected to the
    Home Assistant broker". A wrong password shows the credentials message and

@@ -74,6 +74,18 @@ Collection still needs the Mac to be awake. RuuviMac does not prevent sleep. Aft
 
 If saved data cannot be read at launch, RuuviMac pauses saving so the file is not overwritten, and keeps showing new readings. **Move aside and start fresh** renames the old file to `sensors.json.unreadable-<time>` and resumes saving.
 
+## Home Assistant bridge (v0.5)
+
+RuuviMac can publish the RuuviTags it hears over Bluetooth to the MQTT broker used by Home Assistant's MQTT integration. Each tag appears as a device with temperature, humidity, pressure, battery voltage, signal strength and movement counter entities, through MQTT discovery. No Home Assistant YAML is needed.
+
+Open **Home Assistant…** in the window or the menu bar. Enter the broker host, port, TLS setting, username and password. The default discovery prefix is `homeassistant`. The password is stored in your login Keychain. With this ad-hoc signed build, macOS may ask again whether RuuviMac can use the saved password after each rebuild; choose Always Allow. If the Keychain cannot be read, publishing waits and shows Try again.
+
+Only Bluetooth readings are published. Readings from MQTT input are not, since they are already on a broker. Tags without a MAC address are skipped. Each tag publishes at most once a minute. Entities become unavailable when RuuviMac quits or loses its broker connection, and about ten minutes after a tag stops being heard.
+
+Several Macs can publish to the same broker, but each tag should be published by one Mac only. Turn off **Publish to Home Assistant** for that tag on the other Macs. The MQTT client id is `ruuvimac-ha-<bridge>`, so only one RuuviMac per bridge id should run. **Remove from Home Assistant** deletes the device; if the broker is unreachable, the removal is retried on the next connection. Changing the broker or prefix leaves existing devices on the old broker, so use **Remove all devices from this broker** first.
+
+Topics: discovery configs at `<prefix>/device/ruuvi_<mac>/config` (retained), state at `ruuvimac/<mac>/state`, and availability at `ruuvimac/<bridge>/status` with an MQTT Last Will. RuuviMac republishes configs when Home Assistant sends `online` to `<prefix>/status`.
+
 ## Data and behavior
 
 Names, favorites, latest readings, and history are stored atomically in `~/Library/Containers/org.ruuvimac.app/Data/Library/Application Support/RuuviMac/sensors.json` when sandboxed (or `~/Library/Application Support/RuuviMac/sensors.json` without sandbox). Updates flush about every five seconds and at normal termination. A forced quit may lose the latest few seconds. A malformed archive is reported and saving pauses until you choose Move aside and start fresh.
@@ -98,7 +110,7 @@ Run `swift test` for MQTT message parsing and settings, official protocol vector
 
 Hardware smoke test: launch the bundle, grant Bluetooth, verify a nearby RAWv2 tag appears and readings agree with Ruuvi Station, rename/favorite it, wait for history samples, pause/resume, relaunch to check persistence, move it out of range, and toggle Bluetooth off/on. Also test denied permission recovery in System Settings.
 
-No cloud sync, alarms, CSV export, or firmware updates in v0.4. The app must be running, in the window or the menu bar, and the Mac awake to collect samples.
+No cloud sync, alarms, CSV export, or firmware updates in v0.5. The app must be running, in the window or the menu bar, and the Mac awake to collect samples.
 
 ## Licensing
 

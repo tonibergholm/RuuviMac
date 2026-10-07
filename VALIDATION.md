@@ -93,3 +93,46 @@ GUI interaction, a nearby tag and a logout):
 
 Login item registration and the Login Items approval prompt have not been
 observed on a real login.
+
+## Home Assistant bridge v0.5
+
+- `swift test --build-system native`: 45 tests executed, 4 skipped, zero
+  failures. The skipped tests are the loopback publisher test, the existing
+  real MQTT broker test (both need a broker port), and the two Keychain store
+  tests (they need `RUUVI_KEYCHAIN_TESTS=1`).
+- Loopback publisher test (`RUUVI_MQTT_TEST_PORT`): not run. No local broker
+  was available. Publishing, birth, Last Will and removal against a real
+  broker are unverified by automation.
+- Keychain store tests (`RUUVI_KEYCHAIN_TESTS=1`): run once during Task 3,
+  2 passed with no prompt. The test runner is unsandboxed, so the access
+  behavior of the sandboxed ad-hoc signed app is untested. They were not
+  rerun for this section.
+- Accepted deviation: MQTTNIO 2.13.0 sends the Last Will at QoS 0 (retained).
+- `swift --version`: Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+- `xcodebuild -version`: Xcode 27.0, build version 27A266a.
+- `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
+
+Manual checks with a Home Assistant broker, all pending user test (not run here):
+
+1. Settings: enable with the broker details. Status reaches "Connected to the
+   Home Assistant broker". A wrong password shows the credentials message and
+   keeps retrying. Pending user test.
+2. Home Assistant shows one device per nearby tag with six entities; values
+   match the app. Pending user test.
+3. Rename a tag. The device name changes and no second device appears.
+   Pending user test.
+4. Restart Home Assistant. Devices and values return within about a minute.
+   Pending user test.
+5. Quit RuuviMac while connected. It quits within about 2 seconds, entities
+   become unavailable, and relaunch shows the latest readings. Pending user test.
+6. Turn off Wi-Fi or stop the broker, then restore it. Status shows retrying,
+   then connected; values resume. Pending user test.
+7. Turn off publishing for one tag. Its entities go unavailable after about
+   ten minutes; the device stays. Pending user test.
+8. Remove one tag while the broker is unreachable, then relaunch with the
+   broker reachable. The device disappears. Pending user test.
+9. Keychain across rebuilds, normal launch and login item: whether macOS
+   prompts, what Always Allow does, what Deny plus Try again does, and that
+   menu readings keep updating during an unanswered prompt. Pending user test.
+10. Two bridges with different `ha.bridgeID` values: quitting one does not
+    mark the other's tags unavailable. Pending user test.

@@ -153,10 +153,23 @@ public final class HomeAssistantPublisher {
     /// Sends the tag's config first if this connection has not sent it yet, then the state.
     public func publish(tag: Tag, reading: Reading, rssi: Int) {
         guard connected, let c = client else { return }
-        if !configured.contains(tag.macKey) { publishConfig(tag: tag) }
-        c.publish(to: HomeAssistantDiscovery.stateTopic(macKey: tag.macKey),
-                  payload: ByteBuffer(bytes: HomeAssistantDiscovery.state(reading, rssi: rssi)), qos: .atMostOnce)
-            .whenFailure { [weak self] _ in self?.publishFailed(c) }
+        let topic = HomeAssistantDiscovery.stateTopic(macKey: tag.macKey)
+        let payload = ByteBuffer(bytes: HomeAssistantDiscovery.state(reading, rssi: rssi))
+        let send = { [weak self] in
+            c.publish(to: topic, payload: payload, qos: .atMostOnce)
+                .whenFailure { _ in self?.publishFailed(c) }
+        }
+        let firstOnConnection = !configured.contains(tag.macKey)
+        if firstOnConnection { publishConfig(tag: tag) }
+        send()
+        if firstOnConnection {
+            // Home Assistant subscribes to a new device's state topic only after it processes the discovery
+            // config, so a state sent right behind the first config can be lost. Send it once more.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.client === c, self.connected else { return }
+                send()
+            }
+        }
     }
 
     /// Empty retained config at QoS 1. `onRemoved` fires only after the broker acknowledges it.

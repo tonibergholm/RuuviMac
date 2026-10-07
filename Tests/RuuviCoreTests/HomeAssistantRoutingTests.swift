@@ -20,6 +20,13 @@ final class HomeAssistantRoutingTests: XCTestCase {
         XCTAssertTrue(throttle.shouldPublish("other", now: t0.addingTimeInterval(62)))
     }
 
+    func testThrottleAllowsAfterClockMovesBackward() {
+        var throttle = PublishThrottle()
+        XCTAssertTrue(throttle.shouldPublish(key, now: t0.addingTimeInterval(100)))
+        XCTAssertTrue(throttle.shouldPublish(key, now: t0))
+        XCTAssertFalse(throttle.shouldPublish(key, now: t0.addingTimeInterval(10)))
+    }
+
     func testRouterFiltersSourceIdentityConnectionAndOwnership() {
         var router = HomeAssistantRouter()
         var ledger = HomeAssistantLedger()

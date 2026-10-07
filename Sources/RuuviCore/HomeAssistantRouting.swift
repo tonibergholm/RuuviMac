@@ -63,7 +63,8 @@ public struct PublishThrottle {
     private var last: [String: Date] = [:]
     public init(interval: TimeInterval = 60) { self.interval = interval }
     public mutating func shouldPublish(_ key: String, now: Date) -> Bool {
-        if let previous = last[key], now.timeIntervalSince(previous) < interval { return false }
+        // A negative elapsed time means the wall clock moved backward: publish and restart the interval.
+        if let previous = last[key], case let elapsed = now.timeIntervalSince(previous), elapsed >= 0, elapsed < interval { return false }
         last[key] = now
         return true
     }

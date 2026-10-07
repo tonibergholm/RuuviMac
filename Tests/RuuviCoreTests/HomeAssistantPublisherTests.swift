@@ -65,6 +65,9 @@ final class HomeAssistantPublisherTests: XCTestCase {
         let topics = inbox.all().map(\.topic)
         XCTAssertLessThan(try XCTUnwrap(topics.firstIndex(of: config)), try XCTUnwrap(topics.firstIndex(of: state)))
 
+        // The first state is sent again after discovery so Home Assistant, which subscribes after it processes the config, sees it.
+        XCTAssertTrue(inbox.waitFor(4) { $0.filter { $0.topic == state }.count >= 2 }, "state not resent after discovery")
+
         // The config is retained: a later subscriber receives it.
         let lateInbox = Inbox()
         let late = try observer(port: port, filters: [config], inbox: lateInbox)

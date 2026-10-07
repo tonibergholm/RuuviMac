@@ -25,10 +25,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 Toggle("Favorites only", isOn: $favoritesOnly).padding()
                 List(selection: $selection) {
-                    ForEach(store.sensors.filter { !favoritesOnly || $0.favorite }.sorted {
-                        if $0.favorite != $1.favorite { return $0.favorite }
-                        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-                    }) { sensor in
+                    ForEach(store.sensors.filter { !favoritesOnly || $0.favorite }.sorted(by: MenuSelection.sidebarOrder)) { sensor in
                         HStack {
                             Image(systemName: sensor.favorite ? "star.fill" : "sensor.tag.radiowaves.forward")
                                 .foregroundStyle(sensor.favorite ? Color.orange : Color.secondary)

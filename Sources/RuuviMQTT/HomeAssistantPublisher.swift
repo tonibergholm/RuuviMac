@@ -26,11 +26,16 @@ public final class HomeAssistantPublisher {
     private var stopped = true
     private var delay: Double = 1
     private var configured: Set<String> = []
-    private let identifier = "ruuvimac-ha-" + UUID().uuidString
+    // Stable per bridge: a new publisher takes over the broker session, so a half-open old connection
+    // cannot deliver its Last Will after the new "online".
+    private let identifier: String
+    private var closing: [MQTTClient] = []
+    private var closedWaiters: [() -> Void] = []
     private var availability: String { HomeAssistantDiscovery.availabilityTopic(bridge: bridge) }
 
     public init(settings: HomeAssistantSettings, password: String?, bridge: String, version: String) {
         self.settings = settings; self.password = password; self.bridge = bridge; self.version = version
+        self.identifier = "ruuvimac-ha-" + bridge
     }
 
     public func start() { stopped = false; connect() }
@@ -105,9 +110,16 @@ public final class HomeAssistantPublisher {
         delay = min(delay * 2, 30)
         c.removeCloseListener(named: "reconnect")
         // Reconnect only after the old socket has closed, so its Last Will cannot land after the new "online".
+        closing.append(c)
         c.shutdown { [weak self] _ in
             DispatchQueue.main.async {
-                guard let self, !self.stopped else { return }
+                guard let self else { return }
+                self.closing.removeAll { $0 === c }
+                if self.closing.isEmpty {
+                    let waiters = self.closedWaiters; self.closedWaiters = []
+                    waiters.forEach { MainRunLoop.perform($0) }
+                }
+                guard !self.stopped else { return }
                 let task = DispatchWorkItem { [weak self] in self?.connect() }
                 self.retry = task
                 DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: task)
@@ -155,7 +167,8 @@ public final class HomeAssistantPublisher {
     }
 
     /// Ordered shutdown: stop retries, publish retained offline and wait for the ack, disconnect, shut down.
-    /// `closed` runs exactly once on the main run loop, never synchronously, after the client has really closed.
+    /// `closed` runs exactly once on the main run loop, never synchronously, after every client this publisher
+    /// opened has closed, or after `timeout` when the deadline forces it.
     /// If the broker has not acknowledged within `timeout` seconds the socket is closed anyway and the broker's
     /// Last Will marks this bridge offline. Callers that need a hard time bound (quit) add their own deadline.
     public func stop(timeout: TimeInterval = 2, closed: @escaping () -> Void) {
@@ -169,7 +182,12 @@ public final class HomeAssistantPublisher {
             guard !completed else { return }
             completed = true; deadline?.invalidate(); closed()
         }
-        guard let c = client else { MainRunLoop.perform(complete); return }
+        guard let c = client else {
+            if closing.isEmpty { MainRunLoop.perform(complete); return }
+            closedWaiters.append(complete)
+            deadline = MainRunLoop.after(timeout) { complete() }
+            return
+        }
         client = nil
         c.removeCloseListener(named: "reconnect")
         // shutdown is idempotent; a second call reports alreadyShutdown, which is ignored.

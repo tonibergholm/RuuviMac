@@ -1,5 +1,6 @@
 import XCTest
 import MQTTNIO
+import NIOPosix
 @testable import RuuviCore
 @testable import RuuviMQTT
 
@@ -22,7 +23,7 @@ final class HomeAssistantPublisherTests: XCTestCase {
     }
 
     func observer(port: Int, filters: [String], inbox: Inbox) throws -> MQTTClient {
-        let client = MQTTClient(host: "127.0.0.1", port: port, identifier: UUID().uuidString, eventLoopGroupProvider: .createNew)
+        let client = MQTTClient(host: "127.0.0.1", port: port, identifier: UUID().uuidString, eventLoopGroupProvider: .shared(MultiThreadedEventLoopGroup.singleton))
         client.addPublishListener(named: "inbox") { result in
             guard case .success(let m) = result else { return }
             var b = m.payload
@@ -107,5 +108,20 @@ final class HomeAssistantPublisherTests: XCTestCase {
         let deadline = Date().addingTimeInterval(1)
         while !done && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         XCTAssertTrue(done)
+    }
+
+    func testStopWhileConnectingToUnreachableBrokerCompletesOnce() {
+        XCTAssertTrue(Thread.isMainThread)
+        let publisher = HomeAssistantPublisher(settings: HomeAssistantSettings(host: "127.0.0.1", port: 9), password: nil, bridge: "00000001", version: "test")
+        publisher.start()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        var count = 0
+        publisher.stop { count += 1 }
+        XCTAssertEqual(count, 0, "completion must not run synchronously")
+        let deadline = Date().addingTimeInterval(3)
+        while count < 1 && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        XCTAssertEqual(count, 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        XCTAssertEqual(count, 1, "stop must complete exactly once")
     }
 }

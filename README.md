@@ -64,11 +64,21 @@ History is kept for 10 days, up to 14,400 samples per tag. Live and downloaded s
 
 This needs connectable firmware with logging support. Longlife firmware may not store history, and a broadcast-only tag cannot accept a connection. Connection failures explain Bluetooth power, range, firmware and other active tag connections. Ruuvi Air history and firmware changes are outside this release. History download is local to each app; the two computers do not synchronize databases with each other. MQTT alone cannot fetch a tag's onboard log.
 
+## Menu bar and background collection (v0.4)
+
+RuuviMac keeps running after you close its window. The Dock icon goes away and the sensor icon stays in the menu bar. The menu lists your favorite tags, or all tags if none are favorites, with temperature and humidity. Tags not heard for 30 seconds are marked stale. Click a tag to open it in the window. **Quit RuuviMac** in the menu stops collection.
+
+Turn on **Open at login** in the menu or the window to start collecting after you log in. A login launch starts in the menu bar without a window. macOS may ask you to approve RuuviMac in System Settings → General → Login Items. The app shows an Approve in Login Items button when that is needed.
+
+Collection still needs the Mac to be awake. RuuviMac does not prevent sleep. After wake, Bluetooth scanning resumes and MQTT reconnects.
+
+If saved data cannot be read at launch, RuuviMac pauses saving so the file is not overwritten, and keeps showing new readings. **Move aside and start fresh** renames the old file to `sensors.json.unreadable-<time>` and resumes saving.
+
 ## Data and behavior
 
-Names, favorites, latest readings, and history are stored atomically in `~/Library/Containers/org.ruuvimac.app/Data/Library/Application Support/RuuviMac/sensors.json` when sandboxed (or `~/Library/Application Support/RuuviMac/sensors.json` without sandbox). Updates flush about every five seconds and at normal termination. A forced quit may lose the latest few seconds. A malformed archive is reported rather than silently ignored; move it aside to reset.
+Names, favorites, latest readings, and history are stored atomically in `~/Library/Containers/org.ruuvimac.app/Data/Library/Application Support/RuuviMac/sensors.json` when sandboxed (or `~/Library/Application Support/RuuviMac/sensors.json` without sandbox). Updates flush about every five seconds and at normal termination. A forced quit may lose the latest few seconds. A malformed archive is reported and saving pauses until you choose Move aside and start fresh.
 
-History records new measurement sequences at minute intervals while this Mac is awake and the app receives readings. Repeated transmissions are omitted. Retention is pruned on new samples; old offline samples may remain on disk, but are excluded from the selected chart period. Last readings remain visible after relaunch and show stale until rediscovered. Bluetooth samples use Mac receipt timestamps; MQTT samples use publisher UNIX timestamps.
+History records new measurement sequences at minute intervals while this Mac is awake and the app is running, with or without its window. Repeated transmissions are omitted. Retention is pruned on new samples; old offline samples may remain on disk, but are excluded from the selected chart period. Last readings remain visible after relaunch and show stale until rediscovered. Bluetooth samples use Mac receipt timestamps; MQTT samples use publisher UNIX timestamps.
 
 RAWv2 carries a full sensor MAC used as identity. An unavailable MAC falls back to CoreBluetooth's local peripheral UUID, which can change if macOS resets Bluetooth identity. Pausing scanning keeps existing data visible. Live scanning reads advertisements. History download briefly connects and sends the documented log-read request with the computer’s current clock; it does not erase logs or update firmware.
 
@@ -88,7 +98,7 @@ Run `swift test` for MQTT message parsing and settings, official protocol vector
 
 Hardware smoke test: launch the bundle, grant Bluetooth, verify a nearby RAWv2 tag appears and readings agree with Ruuvi Station, rename/favorite it, wait for history samples, pause/resume, relaunch to check persistence, move it out of range, and toggle Bluetooth off/on. Also test denied permission recovery in System Settings.
 
-No cloud sync, alarms, background launch service, CSV export, or firmware updates in v0.3. The app must stay running and the Mac awake to collect samples.
+No cloud sync, alarms, CSV export, or firmware updates in v0.4. The app must be running, in the window or the menu bar, and the Mac awake to collect samples.
 
 ## Licensing
 

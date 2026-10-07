@@ -64,3 +64,32 @@ executed here. The provided prebuilt app is arm64; build from source for Intel.
   No firmware or tag data was changed.
 - Connectable-advertisement checks now give guidance when the tag broadcasts
   without accepting connections. Only one app should connect to a tag at once.
+
+## Background and menu bar v0.4
+
+- `swift test --build-system native`: 22 tests executed, 1 skipped (the real
+  MQTT broker test, which needs `RUUVI_MQTT_TEST_PORT`), zero failures.
+- `swift --version`: Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+- `xcodebuild -version`: Xcode 27.0, build version 27A266a.
+- `./scripts/build-app.sh` built `dist/RuuviMac.app` and the ZIP.
+
+Smoke test with a RuuviTag, pending user smoke test (not run here; it needs
+GUI interaction, a nearby tag and a logout):
+
+1. Close the window. Dock icon gone, menu icon stays, menu readings update,
+   history sample count rises after a few minutes.
+2. Quit from the menu with the window closed. Relaunch. Latest reading present.
+3. "Open RuuviMac…" restores the window and the Dock icon.
+4. Enable open at login, log out and in, twice: once with "Reopen windows when
+   logging back in" checked and once unchecked. App starts windowless and collects.
+5. Sleep and wake. Scanning resumes and readings update.
+6. Windowless for 10 minutes. `stat -f %m` on the archive shows saves continuing.
+7. Clicking a tag row selects it in the window. "Open RuuviMac…" twice gives one window.
+8. Close the window, then run `open -a RuuviMac` (or open it from Finder). The
+   window, Dock icon and menu bar all return.
+9. Replace a copy of `sensors.json` with `{not json`, launch, let readings
+   arrive, quit. `shasum` of the file is unchanged. Skipped deliberately to
+   avoid touching the real archive; run it on a copy and restore afterward.
+
+Login item registration and the Login Items approval prompt have not been
+observed on a real login.

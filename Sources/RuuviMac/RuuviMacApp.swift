@@ -5,30 +5,33 @@ import RuuviCore
 
 @main
 struct RuuviMacApp: App {
-    @StateObject private var store = SensorStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        WindowGroup {
-            ContentView(store: store)
+        Window("RuuviMac", id: "main") {
+            ContentView(store: delegate.store, selection: delegate.selection, loginItem: delegate.loginItem)
                 .frame(minWidth: 800, minHeight: 540)
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in store.persist() }
+                .background(WindowAccessor { delegate.registerMainWindow($0) })
         }
+        MenuBarExtra("RuuviMac", systemImage: "sensor.tag.radiowaves.forward") {
+            MenuBarView(store: delegate.store, selection: delegate.selection,
+                        loginItem: delegate.loginItem, delegate: delegate)
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 
 struct ContentView: View {
     @ObservedObject var store: SensorStore
-    @State private var selection: String?
+    @ObservedObject var selection: SelectionModel
+    @ObservedObject var loginItem: LoginItem
     @State private var favoritesOnly = false
     @State private var mqttSettings = false
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 Toggle("Favorites only", isOn: $favoritesOnly).padding()
-                List(selection: $selection) {
-                    ForEach(store.sensors.filter { !favoritesOnly || $0.favorite }.sorted {
-                        if $0.favorite != $1.favorite { return $0.favorite }
-                        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-                    }) { sensor in
+                List(selection: $selection.selected) {
+                    ForEach(store.sensors.filter { !favoritesOnly || $0.favorite }.sorted(by: MenuSelection.sidebarOrder)) { sensor in
                         HStack {
                             Image(systemName: sensor.favorite ? "star.fill" : "sensor.tag.radiowaves.forward")
                                 .foregroundStyle(sensor.favorite ? Color.orange : Color.secondary)
@@ -41,7 +44,7 @@ struct ContentView: View {
                 }
             }.navigationTitle("RuuviMac")
         } detail: {
-            if let sensor = store.sensors.first(where: { $0.id == selection }) {
+            if let sensor = store.sensors.first(where: { $0.id == selection.selected }) {
                 SensorDetail(sensor: sensor, store: store).id(sensor.id)
             } else {
                 VStack(spacing: 16) {
@@ -57,13 +60,24 @@ struct ContentView: View {
             HStack {
                 Circle().fill((store.scanning || store.status.hasPrefix("MQTT subscribed")) ? Color.green : Color.secondary).frame(width: 7, height: 7)
                 Text(store.status).font(.caption)
+                if store.savingPaused {
+                    Text("Saving paused").font(.caption).foregroundStyle(.orange)
+                    Button("Move aside and start fresh") { store.moveArchiveAside() }
+                }
                 Spacer()
+                Toggle("Open at login", isOn: Binding(get: { loginItem.registered }, set: { loginItem.set($0) }))
+                    .toggleStyle(.checkbox)
+                if loginItem.needsApproval {
+                    Button("Approve in Login Items…") { loginItem.openSettings() }
+                }
+                if let message = loginItem.message { Text(message).font(.caption).foregroundStyle(.red) }
                 Button("MQTT settings…") { mqttSettings = true }.disabled(store.downloadingTag != nil)
                 Button(store.usingMQTT ? "Use Bluetooth" : store.scanning ? "Pause scanning" : "Resume scanning") { store.toggleScanning() }.disabled(store.downloadingTag != nil)
             }.padding(12).background(.bar)
         }
         .sheet(isPresented: $mqttSettings) { MQTTSettingsView(store: store) }
         .alert("Storage problem", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
+            if store.savingPaused { Button("Move aside and start fresh") { store.moveArchiveAside() } }
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
     }

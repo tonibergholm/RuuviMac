@@ -96,13 +96,16 @@ observed on a real login.
 
 ## Home Assistant bridge v0.5
 
-- `swift test --build-system native`: 45 tests executed, 4 skipped, zero
-  failures. The skipped tests are the loopback publisher test, the existing
-  real MQTT broker test (both need a broker port), and the two Keychain store
-  tests (they need `RUUVI_KEYCHAIN_TESTS=1`).
-- Loopback publisher test (`RUUVI_MQTT_TEST_PORT`): not run. No local broker
-  was available. Publishing, birth, Last Will and removal against a real
-  broker are unverified by automation.
+- `RUUVI_MQTT_TEST_PORT=18884 swift test --build-system native` against a
+  local mosquitto 2.1.2 (127.0.0.1, anonymous): 47 tests executed, 2 skipped
+  (the Keychain store tests), zero failures. The publisher loopback test then
+  passed 5 more consecutive runs. It covers config before state, the retained
+  config seen by a later subscriber, the birth message, the Last Will after an
+  abrupt drop, reconnect, an acknowledged removal, and retained `offline` on
+  ordered stop. The broker log showed both the abrupt close and the clean
+  DISCONNECT. The existing real-broker MQTT input test also passed.
+- Not covered by automation: the bridge controller (settings, Keychain,
+  ownership), Home Assistant itself, and quit inside the running app.
 - Keychain store tests (`RUUVI_KEYCHAIN_TESTS=1`): run once during Task 3,
   2 passed with no prompt. The test runner is unsandboxed, so the access
   behavior of the sandboxed ad-hoc signed app is untested. They were not
